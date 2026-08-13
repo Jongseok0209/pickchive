@@ -1,0 +1,65 @@
+---
+import { env } from "cloudflare:workers";
+import Layout from "@/layouts/Layout.astro";
+import Header from "@/components/Header.astro";
+import Footer from "@/components/Footer.astro";
+
+export const prerender = false;
+
+const error = Astro.url.searchParams.get("error");
+const siteKey = env.PUBLIC_TURNSTILE_SITE_KEY;
+---
+
+<Layout title="회원가입">
+  <Header />
+  <main id="main-content" class="app-layout my-1 max-w-md">
+    <h1 class="my-6 text-2xl font-bold">회원가입</h1>
+
+    {error && <p class="mb-4 text-sm text-red-600">{error}</p>}
+
+    <form method="POST" action="/api/auth/signup" class="flex flex-col gap-4">
+      <label class="flex flex-col gap-1">
+        <span class="text-sm font-medium">아이디</span>
+        <input
+          type="text"
+          name="username"
+          required
+          minlength="2"
+          maxlength="20"
+          class="border-border bg-background rounded border px-3 py-2"
+        />
+      </label>
+      <label class="flex flex-col gap-1">
+        <span class="text-sm font-medium">비밀번호</span>
+        <input
+          type="password"
+          name="password"
+          required
+          minlength="8"
+          class="border-border bg-background rounded border px-3 py-2"
+        />
+      </label>
+
+      <div class="cf-turnstile" data-sitekey={siteKey}></div>
+
+      <button
+        type="submit"
+        class="bg-accent text-accent-foreground rounded px-4 py-2 font-medium"
+      >
+        가입하기
+      </button>
+    </form>
+
+    <p class="text-foreground/60 mt-4 text-sm">
+      이미 계정이 있나요? <a href="/login" class="text-accent underline">로그인</a>
+    </p>
+  </main>
+  <Footer />
+</Layout>
+
+<script
+  is:inline
+  src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+  async
+  defer
+></script>

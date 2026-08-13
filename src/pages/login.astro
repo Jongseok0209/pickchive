@@ -1,0 +1,51 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import Header from "@/components/Header.astro";
+import Footer from "@/components/Footer.astro";
+
+export const prerender = false;
+
+const error = Astro.url.searchParams.get("error");
+---
+
+<Layout title="로그인">
+  <Header />
+  <main id="main-content" class="app-layout my-1 max-w-md">
+    <h1 class="my-6 text-2xl font-bold">로그인</h1>
+
+    {error && <p class="mb-4 text-sm text-red-600">{error}</p>}
+
+    <form method="POST" action="/api/auth/login" class="flex flex-col gap-4">
+      <label class="flex flex-col gap-1">
+        <span class="text-sm font-medium">아이디</span>
+        <input
+          type="text"
+          name="username"
+          required
+          class="border-border bg-background rounded border px-3 py-2"
+        />
+      </label>
+      <label class="flex flex-col gap-1">
+        <span class="text-sm font-medium">비밀번호</span>
+        <input
+          type="password"
+          name="password"
+          required
+          class="border-border bg-background rounded border px-3 py-2"
+        />
+      </label>
+
+      <button
+        type="submit"
+        class="bg-accent text-accent-foreground rounded px-4 py-2 font-medium"
+      >
+        로그인
+      </button>
+    </form>
+
+    <p class="text-foreground/60 mt-4 text-sm">
+      계정이 없나요? <a href="/signup" class="text-accent underline">회원가입</a>
+    </p>
+  </main>
+  <Footer />
+</Layout>
