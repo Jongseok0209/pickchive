@@ -37,6 +37,9 @@ const { post } = Astro.props;
         <span>조회 {formatCount(post.viewCount)}</span>
         <span>추천 {formatCount(post.recommendCount)}</span>
         {post.category && <span>{post.category}</span>}
+        <a href={`/p/${post.id}#comments`} class="text-accent hover:underline">
+          픽카이브 댓글
+        </a>
       </div>
     </div>
   </div>

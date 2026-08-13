@@ -96,3 +96,19 @@ export async function getSites(): Promise<SiteRow[]> {
   ).all<SiteRow>();
   return results;
 }
+
+export async function getPostById(id: number): Promise<PostWithSite | null> {
+  const row = await env.DB.prepare(
+    `SELECT p.id, p.title, p.url, p.author,
+            p.view_count as viewCount, p.recommend_count as recommendCount,
+            p.comment_count as commentCount, p.category,
+            p.posted_at_raw as postedAtRaw, p.first_seen_at as firstSeenAt,
+            s.slug as siteSlug, s.name as siteName
+     FROM posts p
+     JOIN sites s ON p.site_id = s.id
+     WHERE p.id = ?`
+  )
+    .bind(id)
+    .first<PostWithSite>();
+  return row ?? null;
+}

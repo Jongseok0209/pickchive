@@ -188,6 +188,9 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     metaParts.push(`<span>조회 ${formatCount(post.viewCount)}</span>`);
     metaParts.push(`<span>추천 ${formatCount(post.recommendCount)}</span>`);
     if (post.category) metaParts.push(`<span>${escapeHtml(post.category)}</span>`);
+    metaParts.push(
+      `<a href="/p/${post.id}#comments" class="text-accent hover:underline">픽카이브 댓글</a>`
+    );
 
     const commentBadge = post.commentCount
       ? `<span class="text-accent ms-1 text-sm">[${post.commentCount}]</span>`

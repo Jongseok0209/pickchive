@@ -1,0 +1,116 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import Header from "@/components/Header.astro";
+import Footer from "@/components/Footer.astro";
+import { getPostById } from "@/lib/posts";
+import { getComments } from "@/lib/comments";
+import { formatCount } from "@/lib/format";
+
+export const prerender = false;
+
+const id = Number(Astro.params.id);
+const post = id ? await getPostById(id) : null;
+
+if (!post) {
+  return new Response(null, { status: 404 });
+}
+
+const comments = await getComments(post.id);
+const username = await Astro.session?.get("username");
+const error = Astro.url.searchParams.get("error");
+const notice = Astro.url.searchParams.get("notice");
+---
+
+<Layout title={post.title}>
+  <Header />
+  <main id="main-content" class="app-layout my-1 max-w-2xl">
+    <article class="border-border border-b py-6">
+      <span class="bg-muted text-foreground/70 rounded px-1.5 py-0.5 text-xs font-medium">
+        {post.siteName}
+      </span>
+      <h1 class="mt-2 text-xl font-bold sm:text-2xl">
+        <a href={post.url} target="_blank" rel="noopener noreferrer nofollow" class="hover:text-accent">
+          {post.title}
+        </a>
+      </h1>
+      <div class="text-foreground/60 mt-2 flex flex-wrap gap-x-3 text-sm">
+        {post.author && <span>{post.author}</span>}
+        {post.postedAtRaw && <span>{post.postedAtRaw}</span>}
+        <span>조회 {formatCount(post.viewCount)}</span>
+        <span>추천 {formatCount(post.recommendCount)}</span>
+      </div>
+      <a
+        href={post.url}
+        target="_blank"
+        rel="noopener noreferrer nofollow"
+        class="text-accent mt-4 inline-block text-sm underline"
+      >
+        원문 보러가기 →
+      </a>
+    </article>
+
+    <section id="comments" class="py-6">
+      <h2 class="mb-4 text-lg font-semibold">댓글 {comments.length}</h2>
+
+      {error && <p class="mb-3 text-sm text-red-600">{error}</p>}
+      {notice && <p class="mb-3 text-sm text-green-600">{notice}</p>}
+
+      {
+        username ? (
+          <form method="POST" action="/api/comments" class="mb-6 flex flex-col gap-2">
+            <input type="hidden" name="postId" value={post.id} />
+            <textarea
+              name="content"
+              required
+              maxlength="1000"
+              rows="3"
+              placeholder="댓글을 남겨보세요"
+              class="border-border bg-background rounded border px-3 py-2"
+            />
+            <button
+              type="submit"
+              class="bg-accent text-accent-foreground self-start rounded px-4 py-1.5 text-sm font-medium"
+            >
+              작성
+            </button>
+          </form>
+        ) : (
+          <p class="text-foreground/60 mb-6 text-sm">
+            댓글을 작성하려면 <a href="/login" class="text-accent underline">로그인</a>이 필요해요.
+          </p>
+        )
+      }
+
+      <ul class="flex flex-col gap-4">
+        {
+          comments.map(c => (
+            <li class="border-border border-b pb-3">
+              <div class="flex items-baseline justify-between gap-2">
+                <span class="text-sm font-medium">{c.username}</span>
+                <span class="text-foreground/50 text-xs">{c.createdAt}</span>
+              </div>
+              <p class="mt-1 whitespace-pre-wrap">{c.content}</p>
+              {username && (
+                <form method="POST" action="/api/reports" class="mt-1">
+                  <input type="hidden" name="commentId" value={c.id} />
+                  <input type="hidden" name="postId" value={post.id} />
+                  <button type="submit" class="text-foreground/40 hover:text-red-500 text-xs">
+                    🚩 신고
+                  </button>
+                </form>
+              )}
+            </li>
+          ))
+        }
+        {
+          comments.length === 0 && (
+            <li class="text-foreground/50 py-6 text-center text-sm">
+              아직 댓글이 없어요. 첫 댓글을 남겨보세요.
+            </li>
+          )
+        }
+      </ul>
+    </section>
+  </main>
+  <Footer />
+</Layout>
