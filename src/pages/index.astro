@@ -2,17 +2,250 @@
 import Layout from "@/layouts/Layout.astro";
 import Header from "@/components/Header.astro";
 import Footer from "@/components/Footer.astro";
+import PostRow from "@/components/PostRow.astro";
+import { getRankedPosts, getSites, TIME_WINDOWS, DEFAULT_WINDOW, type SortKey } from "@/lib/posts";
+
+export const prerender = false;
+
+const PAGE_SIZE = 20;
+
+const windowParam = Astro.url.searchParams.get("window") ?? DEFAULT_WINDOW;
+const sortParam = (Astro.url.searchParams.get("sort") ?? "score") as SortKey;
+const siteParam = Astro.url.searchParams.get("site") ?? "";
+
+const [posts, sites] = await Promise.all([
+  getRankedPosts({
+    window: windowParam,
+    sort: sortParam,
+    site: siteParam || undefined,
+    limit: PAGE_SIZE,
+    offset: 0,
+  }),
+  getSites(),
+]);
+
+const nextOffset = posts.length === PAGE_SIZE ? PAGE_SIZE : null;
+
+function buildUrl(overrides: Record<string, string | null>): string {
+  const params = new URLSearchParams();
+  const merged = {
+    window: windowParam,
+    sort: sortParam,
+    site: siteParam,
+    ...overrides,
+  };
+  if (merged.window && merged.window !== DEFAULT_WINDOW) params.set("window", merged.window);
+  if (merged.sort && merged.sort !== "score") params.set("sort", merged.sort);
+  if (merged.site) params.set("site", merged.site);
+  const qs = params.toString();
+  return qs ? `/?${qs}` : "/";
+}
+
+const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: "score", label: "종합" },
+  { key: "views", label: "조회수" },
+  { key: "recommend", label: "추천수" },
+  { key: "comments", label: "댓글수" },
+];
 ---
 
 <Layout>
   <Header />
-  <main id="main-content" class="app-layout my-1">
-    <section class="border-border border-b pt-8 pb-6">
-      <h1 class="my-4 inline-block text-4xl font-bold sm:my-8 sm:text-5xl">
-        픽카이브
-      </h1>
-      <p>여러 커뮤니티의 인기글을 한곳에 모아보는 사이트입니다. 랭킹 리스트 준비 중.</p>
+  <main
+    id="main-content"
+    class="app-layout my-1"
+    data-window={windowParam}
+    data-sort={sortParam}
+    data-site={siteParam}
+    data-next-offset={nextOffset ?? ""}
+  >
+    <section class="border-border border-b pt-6 pb-4">
+      <h1 class="mb-3 text-2xl font-bold sm:text-3xl">픽카이브</h1>
+
+      <nav class="mb-2 flex flex-wrap gap-1" aria-label="기간 필터">
+        {
+          TIME_WINDOWS.map(w => (
+            <a
+              href={buildUrl({ window: w.key })}
+              class:list={[
+                "rounded px-3 py-1.5 text-sm font-medium",
+                w.key === windowParam
+                  ? "bg-accent text-accent-foreground"
+                  : "bg-muted hover:text-accent",
+              ]}
+            >
+              {w.label}
+            </a>
+          ))
+        }
+      </nav>
+
+      <nav class="mb-2 flex flex-wrap gap-1" aria-label="정렬 기준">
+        {
+          SORT_OPTIONS.map(s => (
+            <a
+              href={buildUrl({ sort: s.key })}
+              class:list={[
+                "rounded px-2.5 py-1 text-xs font-medium",
+                s.key === sortParam
+                  ? "border-accent text-accent border"
+                  : "border-border text-foreground/60 hover:text-accent border",
+              ]}
+            >
+              {s.label}
+            </a>
+          ))
+        }
+      </nav>
+
+      <nav class="flex flex-wrap gap-1" aria-label="사이트 필터">
+        <a
+          href={buildUrl({ site: null })}
+          class:list={[
+            "rounded px-2.5 py-1 text-xs font-medium",
+            !siteParam
+              ? "border-accent text-accent border"
+              : "border-border text-foreground/60 hover:text-accent border",
+          ]}
+        >
+          전체
+        </a>
+        {
+          sites.map(s => (
+            <a
+              href={buildUrl({ site: s.slug })}
+              class:list={[
+                "rounded px-2.5 py-1 text-xs font-medium",
+                siteParam === s.slug
+                  ? "border-accent text-accent border"
+                  : "border-border text-foreground/60 hover:text-accent border",
+              ]}
+            >
+              {s.name}
+            </a>
+          ))
+        }
+      </nav>
     </section>
+
+    <ul id="post-list" class="pt-2">
+      {posts.map(post => <PostRow post={post} />)}
+      {
+        posts.length === 0 && (
+          <li class="text-foreground/60 py-12 text-center">
+            아직 수집된 글이 없어요. 잠시 후 다시 확인해주세요.
+          </li>
+        )
+      }
+    </ul>
+
+    <div id="infinite-sentinel" class="h-10"></div>
+    <p id="loading-indicator" class="text-foreground/50 hidden py-4 text-center text-sm">
+      불러오는 중...
+    </p>
   </main>
   <Footer />
 </Layout>
+
+<script>
+  function formatCount(n: number): string {
+    if (n >= 10000) {
+      const man = n / 10000;
+      return `${man >= 100 ? Math.round(man) : man.toFixed(1).replace(/\.0$/, "")}만`;
+    }
+    if (n >= 1000) {
+      const cheon = n / 1000;
+      return `${cheon.toFixed(1).replace(/\.0$/, "")}천`;
+    }
+    return String(n);
+  }
+
+  function escapeHtml(s: string): string {
+    return s.replace(
+      /[&<>"']/g,
+      c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!
+    );
+  }
+
+  interface Post {
+    id: number;
+    title: string;
+    url: string;
+    author: string | null;
+    viewCount: number;
+    recommendCount: number;
+    commentCount: number | null;
+    category: string | null;
+    postedAtRaw: string | null;
+    siteSlug: string;
+    siteName: string;
+  }
+
+  function renderRow(post: Post): string {
+    const metaParts: string[] = [];
+    if (post.author) metaParts.push(`<span>${escapeHtml(post.author)}</span>`);
+    if (post.postedAtRaw) metaParts.push(`<span>${escapeHtml(post.postedAtRaw)}</span>`);
+    metaParts.push(`<span>조회 ${formatCount(post.viewCount)}</span>`);
+    metaParts.push(`<span>추천 ${formatCount(post.recommendCount)}</span>`);
+    if (post.category) metaParts.push(`<span>${escapeHtml(post.category)}</span>`);
+
+    const commentBadge = post.commentCount
+      ? `<span class="text-accent ms-1 text-sm">[${post.commentCount}]</span>`
+      : "";
+
+    return `<li class="border-border border-b py-3" data-post-id="${post.id}">
+      <div class="flex items-start gap-2">
+        <span class="bg-muted text-foreground/70 shrink-0 rounded px-1.5 py-0.5 text-xs font-medium" data-site="${post.siteSlug}">${escapeHtml(post.siteName)}</span>
+        <div class="min-w-0 flex-1">
+          <a href="${escapeHtml(post.url)}" target="_blank" rel="noopener noreferrer nofollow" class="hover:text-accent font-medium break-words">${escapeHtml(post.title)}</a>
+          ${commentBadge}
+          <div class="text-foreground/60 mt-1 flex flex-wrap gap-x-2 text-xs">${metaParts.join("")}</div>
+        </div>
+      </div>
+    </li>`;
+  }
+
+  function setupInfiniteScroll() {
+    const main = document.querySelector<HTMLElement>("#main-content");
+    const list = document.querySelector<HTMLUListElement>("#post-list");
+    const sentinel = document.querySelector<HTMLElement>("#infinite-sentinel");
+    const loadingEl = document.querySelector<HTMLElement>("#loading-indicator");
+    if (!main || !list || !sentinel || !loadingEl) return;
+
+    let nextOffset: number | null = main.dataset.nextOffset
+      ? Number(main.dataset.nextOffset)
+      : null;
+    let loading = false;
+
+    const observer = new IntersectionObserver(async entries => {
+      if (!entries[0].isIntersecting || loading || nextOffset === null) return;
+      loading = true;
+      loadingEl.classList.remove("hidden");
+
+      const params = new URLSearchParams({
+        window: main.dataset.window ?? "24h",
+        sort: main.dataset.sort ?? "score",
+        offset: String(nextOffset),
+      });
+      if (main.dataset.site) params.set("site", main.dataset.site);
+
+      try {
+        const res = await fetch(`/api/posts?${params.toString()}`);
+        const data = (await res.json()) as { posts: Post[]; nextOffset: number | null };
+        list.insertAdjacentHTML("beforeend", data.posts.map(renderRow).join(""));
+        nextOffset = data.nextOffset;
+        if (nextOffset === null) observer.disconnect();
+      } catch {
+        // 네트워크 오류 시 다음 스크롤에서 재시도
+      } finally {
+        loading = false;
+        loadingEl.classList.add("hidden");
+      }
+    });
+
+    observer.observe(sentinel);
+  }
+
+  setupInfiniteScroll();
+  document.addEventListener("astro:page-load", setupInfiniteScroll);
+</script>

@@ -34,3 +34,4 @@ public/pagefind
 
 # docker compose
 compose.override.yaml
+worker-configuration.d.ts
