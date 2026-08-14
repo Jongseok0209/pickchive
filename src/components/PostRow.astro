@@ -26,11 +26,7 @@ const isTrending = post.viewGrowth >= TRENDING_THRESHOLD;
           </span>
         )
       }
-      <a
-        href={post.url}
-        rel="noopener noreferrer nofollow"
-        class="hover:text-accent font-medium break-words"
-      >
+      <a href={`/p/${post.id}`} class="hover:text-accent font-medium break-words">
         {post.title}
       </a>
       {
@@ -50,7 +46,7 @@ const isTrending = post.viewGrowth >= TRENDING_THRESHOLD;
         <span>추천 {formatCount(post.recommendCount)}</span>
         {post.category && <span>{post.category}</span>}
         <a href={`/p/${post.id}#comments`} class="text-accent hover:underline">
-          픽카이브 댓글
+          댓글 보기
         </a>
       </div>
     </div>

@@ -23,7 +23,7 @@ const notice = Astro.url.searchParams.get("notice");
 
 <Layout title={post.title}>
   <Header />
-  <main id="main-content" class="app-layout my-1 max-w-3xl">
+  <main id="main-content" class="app-layout my-1 max-w-2xl">
     <article class="border-border border-b py-6">
       <span class="bg-muted text-foreground/70 rounded px-1.5 py-0.5 text-xs font-medium">
         {post.siteName}
@@ -42,24 +42,10 @@ const notice = Astro.url.searchParams.get("notice");
       <a
         href={post.url}
         rel="noopener noreferrer nofollow"
-        class="text-accent mt-2 inline-block text-sm underline"
+        class="text-accent mt-4 inline-block text-sm underline"
       >
-        원문 새 창으로 보기 →
+        원문 보러가기 →
       </a>
-
-      <div class="border-border bg-muted mt-4 overflow-hidden rounded border">
-        <iframe
-          src={post.url}
-          title={post.title}
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          sandbox="allow-scripts allow-same-origin allow-popups"
-          class="h-[70vh] w-full"
-        />
-      </div>
-      <p class="text-foreground/40 mt-1 text-xs">
-        원본 사이트가 프레임 표시를 막아두면 위 영역이 비어있을 수 있어요 — 그럴 땐 위의 "새 창으로 보기"를 이용해주세요.
-      </p>
     </article>
 
     <section id="comments" class="py-6">
