@@ -2,6 +2,21 @@ import { chromium } from "playwright";
 
 const INGEST_URL = "https://pickchive-crawler.won0209.workers.dev/ingest";
 
+// 숫자 파싱은 page.evaluate() 콜백 "밖"(일반 Node 스코프)에서 수행한다.
+// CI에서 이 스크립트를 `npx tsx`로 실행하는데, tsx(esbuild)가 트랜스파일한 코드를
+// page.evaluate 콜백 안에 중첩 함수 선언(화살표 함수를 const에 대입하는 것 포함)이
+// 있으면 브라우저 컨텍스트에 없는 `__name` 헬퍼를 참조해 "ReferenceError: __name is
+// not defined"로 항상 실패한다(2026-08-14 확인, node로는 재현 안 됨 — tsx 전용 버그).
+// 그래서 evaluate 콜백 안에서는 텍스트만 뽑아 반환하고, 숫자 변환은 바깥에서 한다.
+function parseNum(text: string | null | undefined): number {
+  if (!text) return 0;
+  const t = text.trim();
+  const manMatch = t.match(/([0-9.]+)\s*만/);
+  if (manMatch) return Math.round(parseFloat(manMatch[1]) * 10000);
+  const cleaned = t.replace(/[^0-9-]/g, "");
+  return cleaned ? parseInt(cleaned, 10) : 0;
+}
+
 async function crawlFmkorea(browser: any) {
   const page = await browser.newPage({
     userAgent:
@@ -17,18 +32,8 @@ async function crawlFmkorea(browser: any) {
   });
   await page.waitForTimeout(2000);
 
-  const posts = await page.evaluate(() => {
+  const raw = await page.evaluate(() => {
     const list: any[] = [];
-
-    const parseNum = (text: string | null | undefined): number => {
-      if (!text) return 0;
-      const t = text.trim();
-      const manMatch = t.match(/([0-9.]+)\s*만/);
-      if (manMatch) return Math.round(parseFloat(manMatch[1]) * 10000);
-      const cleaned = t.replace(/[^0-9]/g, "");
-      return cleaned ? parseInt(cleaned, 10) : 0;
-    };
-
     const trs = document.querySelectorAll("table.bd_lst tbody tr");
     trs.forEach(tr => {
       const titleLink = tr.querySelector("a.hx");
@@ -53,18 +58,29 @@ async function crawlFmkorea(browser: any) {
       list.push({
         sourcePostId,
         title,
-        url: "https://www.fmkorea.com" + href,
+        href,
         author,
-        viewCount: parseNum(viewCell?.textContent),
-        recommendCount: parseNum(recoCell?.textContent),
-        commentCount: parseNum(commentText),
-        category: null,
-        thumbnailUrl: null,
-        postedAtRaw: timeText,
+        viewText: viewCell?.textContent || null,
+        recoText: recoCell?.textContent || null,
+        commentText,
+        timeText,
       });
     });
     return list;
   });
+
+  const posts = raw.map((p: any) => ({
+    sourcePostId: p.sourcePostId,
+    title: p.title,
+    url: "https://www.fmkorea.com" + p.href,
+    author: p.author,
+    viewCount: parseNum(p.viewText),
+    recommendCount: parseNum(p.recoText),
+    commentCount: parseNum(p.commentText),
+    category: null,
+    thumbnailUrl: null,
+    postedAtRaw: p.timeText,
+  }));
 
   await page.close();
   console.log(`[fmkorea] Playwright found ${posts.length} posts`);
@@ -124,6 +140,69 @@ async function crawlRuliweb(browser: any) {
   return { slug: "ruliweb", posts };
 }
 
+async function crawlDamoang(browser: any) {
+  const page = await browser.newPage({
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+  });
+  // /free HTML은 Cloudflare Turnstile 챌린지로 막혀 있어 일반 fetch로는 우회 불가하지만
+  // 헤드리스 브라우저로는 정상 통과됨을 확인(2026-08-14). RSS(fetchDamoang, 일반 크롤
+  // 경로)는 title/link/author/date만 제공하고 조회수/추천수/댓글수가 구조적으로 없어서,
+  // 이 목록 HTML을 통해 그 값들을 채운다.
+  await page.goto("https://damoang.net/free", { waitUntil: "domcontentloaded", timeout: 30000 });
+  await page.waitForTimeout(3000);
+
+  const raw = await page.evaluate(() => {
+    const list: any[] = [];
+    document.querySelectorAll("a.post-row").forEach(row => {
+      const href = row.getAttribute("href") || "";
+      const match = href.match(/\/free\/(\d+)/);
+      if (!match) return;
+      const sourcePostId = match[1];
+      if (list.some(p => p.sourcePostId === sourcePostId)) return;
+
+      const titleEl = row.querySelector(".post-title");
+      const title = titleEl?.textContent?.trim() || "";
+      if (!title || title.length < 2) return;
+
+      const recoEl = row.querySelector('div[class*="min-h-5"][class*="min-w-10"]');
+      const commentEl = row.querySelector("button.comment-count");
+      const authorEl = row.querySelector('span[class*="md:w-\\[120px\\]"]');
+      const dateEl = row.querySelector('span[class*="md:w-\\[70px\\]"]');
+      const viewEl = row.querySelector('span[class*="md:w-\\[50px\\]"]');
+
+      list.push({
+        sourcePostId,
+        title,
+        href,
+        author: authorEl?.textContent?.trim() || null,
+        viewText: viewEl?.textContent || null,
+        recoText: recoEl?.textContent || null,
+        commentText: commentEl?.textContent || null,
+        dateText: dateEl?.textContent?.trim() || null,
+      });
+    });
+    return list;
+  });
+
+  const posts = raw.map((p: any) => ({
+    sourcePostId: p.sourcePostId,
+    title: p.title,
+    url: "https://damoang.net" + p.href,
+    author: p.author,
+    viewCount: parseNum(p.viewText),
+    recommendCount: parseNum(p.recoText),
+    commentCount: parseNum(p.commentText),
+    category: "자유게시판",
+    thumbnailUrl: null,
+    postedAtRaw: p.dateText,
+  }));
+
+  await page.close();
+  console.log(`[damoang] Playwright found ${posts.length} posts`);
+  return { slug: "damoang", posts };
+}
+
 async function run() {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -145,6 +224,16 @@ async function run() {
         body: JSON.stringify(ruliData),
       });
       console.log(`[ruliweb] Ingest response:`, await res.text());
+    }
+
+    const damoangData = await crawlDamoang(browser);
+    if (damoangData.posts.length > 0) {
+      const res = await fetch(INGEST_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(damoangData),
+      });
+      console.log(`[damoang] Ingest response:`, await res.text());
     }
   } catch (err: any) {
     console.error("Playwright crawl error:", err);
