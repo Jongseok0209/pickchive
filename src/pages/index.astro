@@ -262,6 +262,31 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     </li>`;
   }
 
+  // 홈 피드는 무한스크롤이라, 처음 20개 이후로 스크롤해서 불러온 글들은
+  // 서버가 렌더링한 HTML에는 없고 이 탭의 메모리(DOM)에만 존재한다.
+  // 글 제목을 눌러 다른 사이트로 이동했다가 브라우저가 이 탭을
+  // 메모리 부족 등으로 새로고침(tab discard)해버리면, 스크롤 위치를
+  // 완벽히 복원해도 페이지 자체가 처음 20개짜리로 훨씬 짧아져 있어서
+  // 사실상 맨 위로 돌아간 것처럼 느껴진다. 그래서 스크롤 위치뿐 아니라
+  // "몇 개나 불러왔었는지"도 같이 저장해뒀다가, 새로고침되면 그만큼
+  // 먼저 다시 불러온 다음에 스크롤을 복원한다.
+  const FEED_STATE_KEY = "pc-feed-state";
+
+  function saveFeedState(list: HTMLUListElement) {
+    try {
+      sessionStorage.setItem(
+        FEED_STATE_KEY,
+        JSON.stringify({
+          path: location.pathname + location.search,
+          itemCount: list.children.length,
+          scrollY: window.scrollY,
+        })
+      );
+    } catch {
+      // sessionStorage 접근 불가(프라이빗 모드 등)해도 기능 자체는 계속 동작
+    }
+  }
+
   function setupInfiniteScroll() {
     const main = document.querySelector<HTMLElement>("#main-content");
     const list = document.querySelector<HTMLUListElement>("#post-list");
@@ -275,36 +300,76 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     let loading = false;
     const trendingThreshold = Number(main.dataset.trendingThreshold ?? "300");
 
-    const observer = new IntersectionObserver(async entries => {
-      if (!entries[0].isIntersecting || loading || nextOffset === null) return;
+    async function loadMore(): Promise<boolean> {
+      if (loading || nextOffset === null) return false;
       loading = true;
-      loadingEl.classList.remove("hidden");
+      loadingEl!.classList.remove("hidden");
 
       const params = new URLSearchParams({
-        window: main.dataset.window ?? "24h",
-        sort: main.dataset.sort ?? "score",
+        window: main!.dataset.window ?? "24h",
+        sort: main!.dataset.sort ?? "score",
         offset: String(nextOffset),
       });
-      if (main.dataset.site) params.set("site", main.dataset.site);
+      if (main!.dataset.site) params.set("site", main!.dataset.site);
 
       try {
         const res = await fetch(`/api/posts?${params.toString()}`);
         const data = (await res.json()) as { posts: Post[]; nextOffset: number | null };
-        list.insertAdjacentHTML(
+        list!.insertAdjacentHTML(
           "beforeend",
           data.posts.map(p => renderRow(p, trendingThreshold)).join("")
         );
         nextOffset = data.nextOffset;
         if (nextOffset === null) observer.disconnect();
+        return data.posts.length > 0;
       } catch {
         // 네트워크 오류 시 다음 스크롤에서 재시도
+        return false;
       } finally {
         loading = false;
-        loadingEl.classList.add("hidden");
+        loadingEl!.classList.add("hidden");
       }
+    }
+
+    const observer = new IntersectionObserver(entries => {
+      if (!entries[0].isIntersecting) return;
+      void loadMore();
     });
 
     observer.observe(sentinel);
+
+    // 저장된 상태 복원: 같은 필터(URL)에서 지금보다 더 많이 불러온 적이 있으면
+    // 그만큼 순서대로 다시 불러온 뒤 스크롤 위치를 되돌린다.
+    (async () => {
+      let saved: { path: string; itemCount: number; scrollY: number } | null = null;
+      try {
+        const raw = sessionStorage.getItem(FEED_STATE_KEY);
+        saved = raw ? JSON.parse(raw) : null;
+      } catch {
+        saved = null;
+      }
+      if (!saved || saved.path !== location.pathname + location.search) return;
+
+      while (list!.children.length < saved.itemCount) {
+        const gotMore = await loadMore();
+        if (!gotMore) break;
+      }
+      window.scrollTo(0, saved.scrollY);
+    })();
+
+    let scrollSaveTimer: number | undefined;
+    window.addEventListener(
+      "scroll",
+      () => {
+        window.clearTimeout(scrollSaveTimer);
+        scrollSaveTimer = window.setTimeout(() => saveFeedState(list!), 200);
+      },
+      { passive: true }
+    );
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") saveFeedState(list!);
+    });
+    window.addEventListener("pagehide", () => saveFeedState(list!));
   }
 
   setupInfiniteScroll();
