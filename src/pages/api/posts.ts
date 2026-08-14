@@ -1,23 +1,23 @@
 import type { APIRoute } from "astro";
-import { getRankedPosts, type SortKey } from "@/lib/posts";
+import { getRankedPosts, searchPostsByTitle, type SortKey } from "@/lib/posts";
 
 export const prerender = false;
 
 const PAGE_SIZE = 20;
 
 export const GET: APIRoute = async ({ url }) => {
-  const window = url.searchParams.get("window") ?? "24h";
-  const sort = (url.searchParams.get("sort") ?? "score") as SortKey;
-  const site = url.searchParams.get("site") ?? undefined;
   const offset = Number(url.searchParams.get("offset") ?? "0") || 0;
+  const q = url.searchParams.get("q")?.trim();
 
-  const posts = await getRankedPosts({
-    window,
-    sort,
-    site,
-    limit: PAGE_SIZE,
-    offset,
-  });
+  const posts = q
+    ? await searchPostsByTitle({ query: q, limit: PAGE_SIZE, offset })
+    : await getRankedPosts({
+        window: url.searchParams.get("window") ?? "24h",
+        sort: (url.searchParams.get("sort") ?? "score") as SortKey,
+        site: url.searchParams.get("site") ?? undefined,
+        limit: PAGE_SIZE,
+        offset,
+      });
 
   return Response.json({
     posts,

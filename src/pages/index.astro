@@ -40,7 +40,8 @@ function buildUrl(overrides: Record<string, string | null>): string {
     site: siteParam,
     ...overrides,
   };
-  if (merged.window && merged.window !== DEFAULT_WINDOW) params.set("window", merged.window);
+  if (merged.window && merged.window !== DEFAULT_WINDOW)
+    params.set("window", merged.window);
   if (merged.sort && merged.sort !== "score") params.set("sort", merged.sort);
   if (merged.site) params.set("site", merged.site);
   const qs = params.toString();
@@ -66,70 +67,82 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     data-next-offset={nextOffset ?? ""}
   >
     <section class="border-border border-b pt-6 pb-4">
-      <nav class="mb-2 flex flex-wrap gap-1" aria-label="기간 필터">
-        {
-          TIME_WINDOWS.map(w => (
-            <a
-              href={buildUrl({ window: w.key })}
-              class:list={[
-                "rounded px-3 py-1.5 text-sm font-medium",
-                w.key === windowParam
-                  ? "bg-accent text-accent-foreground"
-                  : "bg-muted hover:text-accent",
-              ]}
-            >
-              {w.label}
-            </a>
-          ))
-        }
-      </nav>
+      <div class="relative mb-3">
+        <input
+          type="search"
+          id="search-input"
+          placeholder="글 제목으로 검색"
+          aria-label="글 제목으로 검색"
+          class="border-border bg-background focus:border-accent w-full rounded border px-3 py-2 text-sm outline-none"
+        />
+      </div>
 
-      <nav class="mb-2 flex flex-wrap gap-1" aria-label="정렬 기준">
-        {
-          SORT_OPTIONS.map(s => (
-            <a
-              href={buildUrl({ sort: s.key })}
-              class:list={[
-                "rounded px-2.5 py-1 text-xs font-medium",
-                s.key === sortParam
-                  ? "border-accent text-accent border"
-                  : "border-border text-foreground/60 hover:text-accent border",
-              ]}
-            >
-              {s.label}
-            </a>
-          ))
-        }
-      </nav>
+      <div id="filter-nav-group">
+        <nav class="mb-2 flex flex-wrap gap-1" aria-label="기간 필터">
+          {
+            TIME_WINDOWS.map(w => (
+              <a
+                href={buildUrl({ window: w.key })}
+                class:list={[
+                  "rounded px-3 py-1.5 text-sm font-medium",
+                  w.key === windowParam
+                    ? "bg-accent text-accent-foreground"
+                    : "bg-muted hover:text-accent",
+                ]}
+              >
+                {w.label}
+              </a>
+            ))
+          }
+        </nav>
 
-      <nav class="flex flex-wrap gap-1" aria-label="사이트 필터">
-        <a
-          href={buildUrl({ site: null })}
-          class:list={[
-            "rounded px-2.5 py-1 text-xs font-medium",
-            !siteParam
-              ? "border-accent text-accent border"
-              : "border-border text-foreground/60 hover:text-accent border",
-          ]}
-        >
-          전체
-        </a>
-        {
-          sites.map(s => (
-            <a
-              href={buildUrl({ site: s.slug })}
-              class:list={[
-                "rounded px-2.5 py-1 text-xs font-medium",
-                siteParam === s.slug
-                  ? "border-accent text-accent border"
-                  : "border-border text-foreground/60 hover:text-accent border",
-              ]}
-            >
-              {s.name}
-            </a>
-          ))
-        }
-      </nav>
+        <nav class="mb-2 flex flex-wrap gap-1" aria-label="정렬 기준">
+          {
+            SORT_OPTIONS.map(s => (
+              <a
+                href={buildUrl({ sort: s.key })}
+                class:list={[
+                  "rounded px-2.5 py-1 text-xs font-medium",
+                  s.key === sortParam
+                    ? "border-accent text-accent border"
+                    : "border-border text-foreground/60 hover:text-accent border",
+                ]}
+              >
+                {s.label}
+              </a>
+            ))
+          }
+        </nav>
+
+        <nav class="flex flex-wrap gap-1" aria-label="사이트 필터">
+          <a
+            href={buildUrl({ site: null })}
+            class:list={[
+              "rounded px-2.5 py-1 text-xs font-medium",
+              !siteParam
+                ? "border-accent text-accent border"
+                : "border-border text-foreground/60 hover:text-accent border",
+            ]}
+          >
+            전체
+          </a>
+          {
+            sites.map(s => (
+              <a
+                href={buildUrl({ site: s.slug })}
+                class:list={[
+                  "rounded px-2.5 py-1 text-xs font-medium",
+                  siteParam === s.slug
+                    ? "border-accent text-accent border"
+                    : "border-border text-foreground/60 hover:text-accent border",
+                ]}
+              >
+                {s.name}
+              </a>
+            ))
+          }
+        </nav>
+      </div>
     </section>
 
     <ul id="post-list" class="pt-2">
@@ -144,7 +157,10 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     </ul>
 
     <div id="infinite-sentinel" class="h-10"></div>
-    <p id="loading-indicator" class="text-foreground/50 hidden py-4 text-center text-sm">
+    <p
+      id="loading-indicator"
+      class="text-foreground/50 hidden py-4 text-center text-sm"
+    >
       불러오는 중...
     </p>
   </main>
@@ -193,7 +209,9 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
         .replace(/&#039;/g, "'")
         .replace(/&#39;/g, "'")
         .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
-        .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(parseInt(code, 16)));
+        .replace(/&#x([0-9a-f]+);/gi, (_, code) =>
+          String.fromCharCode(parseInt(code, 16))
+        );
     }
     return decoded;
   }
@@ -225,12 +243,17 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   function renderRow(post: Post): string {
     const metaParts: string[] = [];
     if (post.author) metaParts.push(`<span>${escapeHtml(post.author)}</span>`);
-    if (post.postedAtRaw) metaParts.push(`<span>${escapeHtml(post.postedAtRaw)}</span>`);
+    if (post.postedAtRaw)
+      metaParts.push(`<span>${escapeHtml(post.postedAtRaw)}</span>`);
     metaParts.push(`<span>조회 ${formatCount(post.viewCount)}</span>`);
     metaParts.push(`<span>추천 ${formatCount(post.recommendCount)}</span>`);
     const relTime = formatRelativeTime(post.crawledAt);
-    if (relTime) metaParts.push(`<span class="text-accent/80 font-medium">${relTime}</span>`);
-    if (post.category) metaParts.push(`<span>${escapeHtml(post.category)}</span>`);
+    if (relTime)
+      metaParts.push(
+        `<span class="text-accent/80 font-medium">${relTime}</span>`
+      );
+    if (post.category)
+      metaParts.push(`<span>${escapeHtml(post.category)}</span>`);
     metaParts.push(
       `<a href="/p/${post.id}#comments" data-astro-reload class="text-accent hover:underline">댓글 보기</a>`
     );
@@ -271,8 +294,12 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   let restoringFeed = false;
   let feedListeners: AbortController | undefined;
 
+  // 검색 중에는 목록이 "인기글 피드"가 아니라 검색 결과라서, 여기서 저장해버리면
+  // 나중에 무관한 피드 재방문 때 엉뚱한 개수만큼 미리 불러오려 든다. 검색 중엔 저장을 건너뛴다.
+  let searchModeActive = false;
+
   function saveFeedState(list: HTMLUListElement) {
-    if (restoringFeed) return;
+    if (restoringFeed || searchModeActive) return;
     try {
       sessionStorage.setItem(
         FEED_STATE_KEY,
@@ -298,22 +325,28 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
       ? Number(main.dataset.nextOffset)
       : null;
     let loading = false;
+    let searchQuery = "";
 
     async function loadMore(): Promise<boolean> {
       if (loading || nextOffset === null) return false;
       loading = true;
       loadingEl!.classList.remove("hidden");
 
-      const params = new URLSearchParams({
-        window: main!.dataset.window ?? "24h",
-        sort: main!.dataset.sort ?? "score",
-        offset: String(nextOffset),
-      });
-      if (main!.dataset.site) params.set("site", main!.dataset.site);
+      const params = new URLSearchParams({ offset: String(nextOffset) });
+      if (searchModeActive) {
+        params.set("q", searchQuery);
+      } else {
+        params.set("window", main!.dataset.window ?? "24h");
+        params.set("sort", main!.dataset.sort ?? "score");
+        if (main!.dataset.site) params.set("site", main!.dataset.site);
+      }
 
       try {
         const res = await fetch(`/api/posts?${params.toString()}`);
-        const data = (await res.json()) as { posts: Post[]; nextOffset: number | null };
+        const data = (await res.json()) as {
+          posts: Post[];
+          nextOffset: number | null;
+        };
         list!.insertAdjacentHTML(
           "beforeend",
           data.posts.map(p => renderRow(p)).join("")
@@ -342,7 +375,8 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     // 0으로 되돌아가는 문제가 있었다(실제 재현 후 확인). 그래서 복원이 끝날
     // 때까지 observer를 붙이지 않는다.
     async function restoreFeedState(): Promise<void> {
-      let saved: { path: string; itemCount: number; scrollY: number } | null = null;
+      let saved: { path: string; itemCount: number; scrollY: number } | null =
+        null;
       try {
         const raw = sessionStorage.getItem(FEED_STATE_KEY);
         saved = raw ? JSON.parse(raw) : null;
@@ -403,6 +437,77 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
         if ((e.target as HTMLElement).closest("a")) saveFeedState(list!);
       },
       { capture: true, signal }
+    );
+
+    // 검색: 페이지 이동 없이 같은 화면에서 목록만 검색 결과로 바꿔치기한다.
+    const searchInput =
+      document.querySelector<HTMLInputElement>("#search-input");
+    const filterNavGroup =
+      document.querySelector<HTMLElement>("#filter-nav-group");
+    let feedSnapshotHTML = "";
+    let feedNextOffset: number | null = null;
+
+    function emptySearchResultHTML(query: string): string {
+      return `<li class="text-foreground/60 py-12 text-center">"${escapeHtml(query)}" 검색 결과가 없어요.</li>`;
+    }
+
+    async function runSearch(query: string): Promise<void> {
+      if (!searchModeActive) {
+        // 검색 시작 시점의 피드(스크롤로 더 불러온 것까지 포함)를 스냅샷해뒀다가
+        // 검색어를 지우면 원래 보던 그대로 되돌려준다.
+        feedSnapshotHTML = list!.innerHTML;
+        feedNextOffset = nextOffset;
+      }
+      searchModeActive = true;
+      searchQuery = query;
+      filterNavGroup?.classList.add("hidden");
+      observer.disconnect();
+      loading = true;
+      loadingEl!.classList.remove("hidden");
+
+      try {
+        const res = await fetch(
+          `/api/posts?${new URLSearchParams({ q: query, offset: "0" })}`
+        );
+        const data = (await res.json()) as {
+          posts: Post[];
+          nextOffset: number | null;
+        };
+        list!.innerHTML = data.posts.length
+          ? data.posts.map(p => renderRow(p)).join("")
+          : emptySearchResultHTML(query);
+        nextOffset = data.nextOffset;
+      } catch {
+        // 네트워크 오류 시 다음 입력에서 재시도
+      } finally {
+        loading = false;
+        loadingEl!.classList.add("hidden");
+        if (nextOffset !== null) observer.observe(sentinel!);
+      }
+    }
+
+    function exitSearch(): void {
+      searchModeActive = false;
+      searchQuery = "";
+      filterNavGroup?.classList.remove("hidden");
+      list!.innerHTML = feedSnapshotHTML;
+      nextOffset = feedNextOffset;
+      observer.disconnect();
+      if (nextOffset !== null) observer.observe(sentinel!);
+    }
+
+    let searchDebounceTimer: number | undefined;
+    searchInput?.addEventListener(
+      "input",
+      () => {
+        window.clearTimeout(searchDebounceTimer);
+        const value = searchInput.value.trim();
+        searchDebounceTimer = window.setTimeout(() => {
+          if (value) void runSearch(value);
+          else if (searchModeActive) exitSearch();
+        }, 300);
+      },
+      { signal }
     );
   }
 

@@ -17,6 +17,7 @@ export interface PostWithSite {
 }
 
 export const TIME_WINDOWS = [
+  { key: "1h", label: "1시간", hours: 1 },
   { key: "3h", label: "3시간", hours: 3 },
   { key: "6h", label: "6시간", hours: 6 },
   { key: "12h", label: "12시간", hours: 12 },
@@ -83,6 +84,32 @@ export async function getRankedPosts(options: {
 
   const { results } = await env.DB.prepare(query)
     .bind(...binds)
+    .all<PostWithSite>();
+  return results;
+}
+
+export async function searchPostsByTitle(options: {
+  query: string;
+  limit: number;
+  offset: number;
+}): Promise<PostWithSite[]> {
+  // % _ \ 는 LIKE 와일드카드로 해석되니 검색어에 그대로 들어있으면 이스케이프한다.
+  const escapedQuery = options.query.replace(/[\\%_]/g, ch => `\\${ch}`);
+
+  const { results } = await env.DB.prepare(
+    `SELECT p.id, p.title, p.url, p.author,
+            p.view_count as viewCount, p.recommend_count as recommendCount,
+            p.comment_count as commentCount, p.category,
+            p.posted_at_raw as postedAtRaw, p.first_seen_at as firstSeenAt,
+            p.crawled_at as crawledAt,
+            s.slug as siteSlug, s.name as siteName
+     FROM posts p
+     JOIN sites s ON p.site_id = s.id
+     WHERE p.title LIKE ? ESCAPE '\\'
+     ORDER BY p.first_seen_at DESC
+     LIMIT ? OFFSET ?`
+  )
+    .bind(`%${escapedQuery}%`, options.limit, options.offset)
     .all<PostWithSite>();
   return results;
 }
