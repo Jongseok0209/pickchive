@@ -30,13 +30,14 @@ const CRAWL_ATTEMPTS = 3;
 async function crawlSite(
   db: Env["DB"],
   slug: string,
-  fetcher: () => Promise<Awaited<ReturnType<typeof fetchClien>>>
+  fetcher: () => Promise<Awaited<ReturnType<typeof fetchClien>>>,
+  attempts: number = CRAWL_ATTEMPTS
 ) {
   const siteId = await getSiteId(db, slug);
   let posts: Awaited<ReturnType<typeof fetchClien>> = [];
   let lastError: string | undefined;
 
-  for (let attempt = 0; attempt < CRAWL_ATTEMPTS; attempt++) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     try {
       posts = await fetcher();
       lastError = undefined;
@@ -45,7 +46,7 @@ async function crawlSite(
       lastError = err?.message ?? String(err);
       posts = [];
     }
-    if (attempt < CRAWL_ATTEMPTS - 1) {
+    if (attempt < attempts - 1) {
       await new Promise(resolve => setTimeout(resolve, 700 * (attempt + 1)));
     }
   }
@@ -87,7 +88,11 @@ const CRAWL_FETCHERS: Record<string, (db: Env["DB"]) => Promise<void>> = {
   bobaedream: db => crawlSite(db, "bobaedream", fetchBobaedream),
   cook82: db => crawlSite(db, "cook82", fetchCook82),
   inven: db => crawlSite(db, "inven", fetchInven),
-  todayhumor: db => crawlSite(db, "todayhumor", fetchTodayhumor),
+  // 오늘의유머는 차단이 아니라 같은 요청도 서버가 비결정적으로 빈 목록/정상
+  // 목록을 섞어서 준다(2026-08-14 확인 — 14시간 연속 0건이다가 수동으로 두 번
+  // 찔러보니 그중 한 번은 정상 30건). 기본 3회로는 실패율이 너무 높아서
+  // todayhumor만 재시도를 6회로 늘림.
+  todayhumor: db => crawlSite(db, "todayhumor", fetchTodayhumor, 6),
   ddanzi: db => crawlSite(db, "ddanzi", fetchDdanzi),
   humoruniv: db => crawlSite(db, "humoruniv", fetchHumoruniv),
   etoland: db => crawlSite(db, "etoland", fetchEtoland),
@@ -146,6 +151,31 @@ export default {
         return new Response(`Crawled ${site}`, { status: 200 });
       } catch (err: any) {
         return new Response(`Crawl failed: ${err?.message ?? err}`, { status: 500 });
+      }
+    }
+    if (url.pathname === "/debug-fetch") {
+      const target = url.searchParams.get("url");
+      if (!target) return new Response("Usage: /debug-fetch?url=...", { status: 400 });
+      try {
+        const res = await fetch(target, {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          },
+        });
+        const text = await res.text();
+        return Response.json({
+          target,
+          status: res.status,
+          cfRay: res.headers.get("cf-ray"),
+          contentLength: text.length,
+          titleMatch: text.match(/<title>([^<]*)<\/title>/)?.[1] ?? null,
+          viewRowCount: (text.match(/class="view /g) || []).length,
+          subjectCount: (text.match(/class="subject"/g) || []).length,
+          snippet: text.slice(0, 500),
+        });
+      } catch (err: any) {
+        return Response.json({ error: err?.message ?? String(err) });
       }
     }
     if (url.pathname === "/health") {
