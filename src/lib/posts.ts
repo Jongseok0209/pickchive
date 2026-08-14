@@ -56,12 +56,17 @@ export async function getRankedPosts(options: {
   window: string;
   sort?: SortKey;
   site?: string;
+  // 제목 검색어. 넘기면 현재 기간/사이트/정렬 필터가 적용된 목록 "안에서" 제목에
+  // 이 글자가 포함된 글만 추린다 (별도 검색 모드가 아니라 같은 필터의 연장선).
+  titleQuery?: string;
   limit: number;
   offset: number;
 }): Promise<PostWithSite[]> {
   const hours = hoursForWindow(options.window);
   const sort = options.sort ?? "score";
   const siteFilter = options.site ? "AND s.slug = ?" : "";
+  const titleQuery = options.titleQuery?.trim();
+  const titleFilter = titleQuery ? "AND p.title LIKE ? ESCAPE '\\'" : "";
 
   const query = `
     SELECT p.id, p.title, p.url, p.author,
@@ -74,42 +79,21 @@ export async function getRankedPosts(options: {
     JOIN sites s ON p.site_id = s.id
     WHERE p.first_seen_at >= datetime('now', ?)
     ${siteFilter}
+    ${titleFilter}
     ORDER BY ${orderByClause(sort)}
     LIMIT ? OFFSET ?
   `;
 
   const binds: unknown[] = [`-${hours} hours`];
   if (options.site) binds.push(options.site);
+  if (titleQuery) {
+    // % _ \ 는 LIKE 와일드카드로 해석되니 검색어에 그대로 들어있으면 이스케이프한다.
+    binds.push(`%${titleQuery.replace(/[\\%_]/g, ch => `\\${ch}`)}%`);
+  }
   binds.push(options.limit, options.offset);
 
   const { results } = await env.DB.prepare(query)
     .bind(...binds)
-    .all<PostWithSite>();
-  return results;
-}
-
-export async function searchPostsByTitle(options: {
-  query: string;
-  limit: number;
-  offset: number;
-}): Promise<PostWithSite[]> {
-  // % _ \ 는 LIKE 와일드카드로 해석되니 검색어에 그대로 들어있으면 이스케이프한다.
-  const escapedQuery = options.query.replace(/[\\%_]/g, ch => `\\${ch}`);
-
-  const { results } = await env.DB.prepare(
-    `SELECT p.id, p.title, p.url, p.author,
-            p.view_count as viewCount, p.recommend_count as recommendCount,
-            p.comment_count as commentCount, p.category,
-            p.posted_at_raw as postedAtRaw, p.first_seen_at as firstSeenAt,
-            p.crawled_at as crawledAt,
-            s.slug as siteSlug, s.name as siteName
-     FROM posts p
-     JOIN sites s ON p.site_id = s.id
-     WHERE p.title LIKE ? ESCAPE '\\'
-     ORDER BY p.first_seen_at DESC
-     LIMIT ? OFFSET ?`
-  )
-    .bind(`%${escapedQuery}%`, options.limit, options.offset)
     .all<PostWithSite>();
   return results;
 }
