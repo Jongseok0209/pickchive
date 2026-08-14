@@ -1,10 +1,16 @@
 import { parseIntSafe, type RawPost } from "../types";
 
-const LIST_URL = "https://www.todayhumor.co.kr/board/list.php?table=bestofbest";
+// bestofbest(베스트 오브 베스트)만 보다가, humorbest(유머 베스트)도 같이
+// 시도해달라는 요청으로 두 게시판을 합쳐서 가져온다. 둘 다 같은 HTML
+// 구조를 쓴다.
+const LIST_URLS = [
+  "https://www.todayhumor.co.kr/board/list.php?table=bestofbest",
+  "https://www.todayhumor.co.kr/board/list.php?table=humorbest",
+];
 const BASE_URL = "https://www.todayhumor.co.kr";
 
-export async function fetchTodayhumor(): Promise<RawPost[]> {
-  const res = await fetch(LIST_URL, {
+async function fetchTodayhumorList(listUrl: string): Promise<RawPost[]> {
+  const res = await fetch(listUrl, {
     headers: {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -128,4 +134,19 @@ export async function fetchTodayhumor(): Promise<RawPost[]> {
   return rows.filter(
     (r): r is RawPost => !!r.sourcePostId && !!r.title && !!r.url
   );
+}
+
+export async function fetchTodayhumor(): Promise<RawPost[]> {
+  const lists = await Promise.all(LIST_URLS.map(fetchTodayhumorList));
+
+  // bestofbest와 humorbest에 같은 글이 겹쳐서 뜨는 경우가 있어 sourcePostId로 합친다.
+  const bySourcePostId = new Map<string, RawPost>();
+  for (const list of lists) {
+    for (const post of list) {
+      if (!bySourcePostId.has(post.sourcePostId)) {
+        bySourcePostId.set(post.sourcePostId, post);
+      }
+    }
+  }
+  return [...bySourcePostId.values()];
 }
