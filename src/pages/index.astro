@@ -232,7 +232,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     if (relTime) metaParts.push(`<span class="text-accent/80 font-medium">${relTime}</span>`);
     if (post.category) metaParts.push(`<span>${escapeHtml(post.category)}</span>`);
     metaParts.push(
-      `<a href="/p/${post.id}#comments" class="text-accent hover:underline">댓글 보기</a>`
+      `<a href="/p/${post.id}#comments" data-astro-reload class="text-accent hover:underline">댓글 보기</a>`
     );
 
     const commentBadge = post.commentCount
@@ -269,6 +269,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   // 복원이 진행되는 동안에는 저장하지 않는다. 복원 중 발생하는 스크롤/로드가
   // 저장된 목표값(원래 보던 위치)을 덮어쓰면 복원 자체가 무의미해진다.
   let restoringFeed = false;
+  let feedListeners: AbortController | undefined;
 
   function saveFeedState(list: HTMLUListElement) {
     if (restoringFeed) return;
@@ -366,6 +367,14 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
       observer.observe(sentinel);
     });
 
+    // window/document 리스너는 DOM 교체(Astro 뷰 트랜지션)로 사라지지 않는다.
+    // 페이지를 오갈 때마다 setup이 다시 불리므로 정리하지 않으면 리스너가
+    // 겹겹이 쌓이고, 오래된 리스너가 이미 화면에서 떨어져 나간 옛 목록을
+    // 참조한 채 엉뚱한 값을 저장해 복원을 망가뜨린다.
+    feedListeners?.abort();
+    feedListeners = new AbortController();
+    const { signal } = feedListeners;
+
     let scrollSaveTimer: number | undefined;
     window.addEventListener(
       "scroll",
@@ -373,12 +382,16 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
         window.clearTimeout(scrollSaveTimer);
         scrollSaveTimer = window.setTimeout(() => saveFeedState(list!), 200);
       },
-      { passive: true }
+      { passive: true, signal }
     );
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden") saveFeedState(list!);
-    });
-    window.addEventListener("pagehide", () => saveFeedState(list!));
+    document.addEventListener(
+      "visibilitychange",
+      () => {
+        if (document.visibilityState === "hidden") saveFeedState(list!);
+      },
+      { signal }
+    );
+    window.addEventListener("pagehide", () => saveFeedState(list!), { signal });
 
     // pagehide/visibilitychange 시점엔 브라우저가 이미 스크롤 위치를 0으로
     // 되돌려놓은 뒤라(실제 확인함 — 저장된 scrollY가 항상 0으로 찍힘) 너무 늦다.
@@ -389,7 +402,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
       e => {
         if ((e.target as HTMLElement).closest("a")) saveFeedState(list!);
       },
-      { capture: true }
+      { capture: true, signal }
     );
   }
 

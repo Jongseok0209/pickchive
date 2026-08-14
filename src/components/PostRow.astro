@@ -43,7 +43,16 @@ const relativeCrawledTime = formatRelativeTime(post.crawledAt);
         <span>추천 {formatCount(post.recommendCount)}</span>
         {relativeCrawledTime && <span class="text-accent/80 font-medium">{relativeCrawledTime}</span>}
         {post.category && <span>{post.category}</span>}
-        <a href={`/p/${post.id}#comments`} class="text-accent hover:underline">
+        <!--
+          data-astro-reload: 뷰 트랜지션(클라이언트 라우팅)으로 이동하면 Astro의
+          자체 스크롤 복원이 우리 피드 복원 로직과 충돌해 뒤로가기 시 목록/스크롤이
+          날아간다(실제 재현 확인). 전체 페이지 로드 경로는 정상 동작하므로 그쪽으로 보낸다.
+        -->
+        <a
+          href={`/p/${post.id}#comments`}
+          data-astro-reload
+          class="text-accent hover:underline"
+        >
           댓글 보기
         </a>
       </div>
