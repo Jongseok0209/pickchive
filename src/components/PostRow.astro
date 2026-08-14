@@ -27,7 +27,11 @@ const relativeCrawledTime = formatRelativeTime(post.crawledAt);
           </span>
         )
       }
-      <a href={`/p/${post.id}`} class="hover:text-accent font-medium break-words">
+      <a
+        href={post.url}
+        rel="noopener noreferrer nofollow"
+        class="hover:text-accent font-medium break-words"
+      >
         {decodeEntities(post.title)}
       </a>
       {
