@@ -1,7 +1,13 @@
 import { parseIntSafe, type RawPost } from "../types";
 
-const LIST_URL = "http://web.humoruniv.com/board/humor/list.html?table=pds";
-const BASE_URL = "http://web.humoruniv.com";
+// st=day: 오늘의 베스트. 파라미터 없이 table=pds만 쓰면 그냥 최신 등록순이라
+// 조회수/추천수 낮은 글이 섞여 들어온다.
+const LIST_URL = "http://web.humoruniv.com/board/humor/list.html?table=pds&st=day";
+// 목록 페이지의 href는 "read.html?..." 같은 상대경로라 BASE_URL이 도메인 루트만
+// 가리키면 실제 글 경로("/board/humor/")가 빠진 채로("web.humoruniv.com/read.html")
+// 잘못 조립되어 항상 404가 난다(2026-08-14 확인). 목록 페이지 자체를 base로 써서
+// 상대경로를 올바르게 해석한다.
+const BASE_URL = LIST_URL;
 
 export async function fetchHumoruniv(): Promise<RawPost[]> {
   const res = await fetch(LIST_URL, {

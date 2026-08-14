@@ -32,11 +32,14 @@ export async function upsertPosts(
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
       ON CONFLICT (site_id, source_post_id) DO UPDATE SET
         title = excluded.title,
+        url = excluded.url,
+        author = excluded.author,
         view_count = excluded.view_count,
         recommend_count = excluded.recommend_count,
         comment_count = excluded.comment_count,
         category = excluded.category,
         thumbnail_url = excluded.thumbnail_url,
+        posted_at_raw = excluded.posted_at_raw,
         crawled_at = datetime('now')
     `);
 
@@ -91,9 +94,13 @@ export async function cleanupOldData(db: Env["DB"]): Promise<{
   postsDeleted: number;
   snapshotsDeleted: number;
 }> {
+  // 목록에서 밀려나 더 이상 재수집되지 않는(=crawled_at이 갱신을 멈춘) 글은
+  // 24시간 지나면 지운다. 처음 본 지 30일 지난 글도 별도로 지운다(둘 중 하나만
+  // 걸려도 삭제).
   const postsResult = await db
     .prepare(
-      `DELETE FROM posts WHERE first_seen_at < datetime('now', '-30 days')`
+      `DELETE FROM posts WHERE first_seen_at < datetime('now', '-30 days')
+        OR crawled_at < datetime('now', '-24 hours')`
     )
     .run();
   const snapshotsResult = await db

@@ -1,6 +1,8 @@
 import { fetchHtml, parseIntSafe, type RawPost } from "../types";
 
-const LIST_URL = "https://www.clien.net/service/board/park";
+// od=T33: 공감순 정렬. 기본(정렬 파라미터 없음)은 등록일순이라 그냥 최신글이
+// 섞여 들어옴 — 인기글(공감 많은 글) 위주로 모으려고 정렬을 명시한다.
+const LIST_URL = "https://www.clien.net/service/board/park?od=T33";
 const BASE_URL = "https://www.clien.net";
 
 export async function fetchClien(): Promise<RawPost[]> {
