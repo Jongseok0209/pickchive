@@ -73,6 +73,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
             TIME_WINDOWS.map(w => (
               <a
                 href={buildUrl({ window: w.key })}
+                data-window-value={w.key}
                 class:list={[
                   "rounded px-3 py-1.5 text-sm font-medium",
                   w.key === windowParam
@@ -91,6 +92,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
             SORT_OPTIONS.map(s => (
               <a
                 href={buildUrl({ sort: s.key })}
+                data-sort-value={s.key}
                 class:list={[
                   "rounded px-2.5 py-1 text-xs font-medium",
                   s.key === sortParam
@@ -107,6 +109,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
         <nav class="flex flex-wrap gap-1" aria-label="사이트 필터">
           <a
             href={buildUrl({ site: null })}
+            data-site-value=""
             class:list={[
               "rounded px-2.5 py-1 text-xs font-medium",
               !siteParam
@@ -120,6 +123,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
             sites.map(s => (
               <a
                 href={buildUrl({ site: s.slug })}
+                data-site-value={s.slug}
                 class:list={[
                   "rounded px-2.5 py-1 text-xs font-medium",
                   siteParam === s.slug
@@ -611,6 +615,49 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
       { signal }
     );
 
+    // 각 필터 버튼의 href는 서버 렌더링 시점(buildUrl)에 한 번만 계산돼서, 그
+    // 시점의 window/sort/site 조합이 그대로 굳어있다. 검색 중에 필터 하나를
+    // JS로 바꾸면(페이지 재로드 없이) 그 필터 자신의 href만 최신이 아니라
+    // *다른* 필터 버튼들의 href도 예전 조합인 채로 남는다 — 그 상태에서 검색을
+    // 끝내고 다른 버튼을 누르면 방금 바꾼 적 없는 필터까지 예전 값으로 같이
+    // 튀어버린다(실제 재현: "전체" 눌렀는데 기간이 24시간으로 바뀜). 그래서
+    // 필터를 하나 바꿀 때마다 현재 상태 기준으로 모든 버튼의 href를 다시 계산해준다.
+    function buildClientUrl(
+      overrides: Partial<Record<"window" | "sort" | "site", string>>
+    ): string {
+      const params = new URLSearchParams();
+      const state = {
+        window: main!.dataset.window || "24h",
+        sort: main!.dataset.sort || "score",
+        site: main!.dataset.site || "",
+        ...overrides,
+      };
+      if (state.window && state.window !== "24h")
+        params.set("window", state.window);
+      if (state.sort && state.sort !== "score") params.set("sort", state.sort);
+      if (state.site) params.set("site", state.site);
+      const qs = params.toString();
+      return qs ? `/?${qs}` : "/";
+    }
+
+    function refreshFilterHrefs(): void {
+      document
+        .querySelectorAll<HTMLAnchorElement>("a[data-window-value]")
+        .forEach(a => {
+          a.href = buildClientUrl({ window: a.dataset.windowValue });
+        });
+      document
+        .querySelectorAll<HTMLAnchorElement>("a[data-sort-value]")
+        .forEach(a => {
+          a.href = buildClientUrl({ sort: a.dataset.sortValue });
+        });
+      document
+        .querySelectorAll<HTMLAnchorElement>("a[data-site-value]")
+        .forEach(a => {
+          a.href = buildClientUrl({ site: a.dataset.siteValue || undefined });
+        });
+    }
+
     // 검색 중에 기간/정렬/사이트 필터를 누르면, 원래는 그냥 일반 링크라 페이지가
     // 통째로 새로고침되면서 검색어가 날아간다. 검색 중일 때는 그 이동을 막고
     // 같은 검색어를 유지한 채 새 필터로 다시 검색한다(검색 중이 아니면 평소처럼
@@ -634,10 +681,10 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
           if (!searchModeActive) return; // 검색 중이 아니면 원래대로 페이지 이동
 
           e.preventDefault();
-          const targetUrl = new URL(link.href);
-          const value = targetUrl.searchParams.get(datasetKey) ?? defaultValue;
+          const value = link.dataset[`${datasetKey}Value`] ?? defaultValue;
           main!.dataset[datasetKey] = value;
-          history.replaceState(history.state, "", targetUrl);
+          refreshFilterHrefs();
+          history.replaceState(history.state, "", buildClientUrl({}));
 
           nav.querySelectorAll("a").forEach(a => {
             const isTarget = a === link;
