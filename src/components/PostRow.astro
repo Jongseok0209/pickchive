@@ -1,12 +1,13 @@
 ---
 import { formatCount } from "@/lib/format";
-import type { PostWithSite } from "@/lib/posts";
+import { TRENDING_THRESHOLD, type PostWithSite } from "@/lib/posts";
 
 interface Props {
   post: PostWithSite;
 }
 
 const { post } = Astro.props;
+const isTrending = post.viewGrowth >= TRENDING_THRESHOLD;
 ---
 
 <li class="border-border border-b py-3" data-post-id={post.id}>
@@ -18,6 +19,13 @@ const { post } = Astro.props;
       {post.siteName}
     </span>
     <div class="min-w-0 flex-1">
+      {
+        isTrending && (
+          <span class="mr-1 text-sm" title={`최근 2시간 조회수 +${post.viewGrowth}`}>
+            🔥
+          </span>
+        )
+      }
       <a
         href={post.url}
         rel="noopener noreferrer nofollow"
