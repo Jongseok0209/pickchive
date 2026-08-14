@@ -1,0 +1,13 @@
+name: Cleanup
+
+on:
+  schedule:
+    - cron: "0 19 * * *"
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete old posts and rank snapshots
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/cleanup"

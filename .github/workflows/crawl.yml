@@ -1,0 +1,26 @@
+name: Crawl
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Crawl clien
+        continue-on-error: true
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=clien"
+      - name: Crawl ppomppu
+        continue-on-error: true
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=ppomppu"
+      - name: Crawl bobaedream
+        continue-on-error: true
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=bobaedream"
+      - name: Crawl cook82
+        continue-on-error: true
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=cook82"
+      - name: Crawl inven
+        continue-on-error: true
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=inven"
