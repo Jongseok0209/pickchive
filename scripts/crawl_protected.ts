@@ -79,6 +79,12 @@ async function crawlFmkorea(browser: any) {
     if (raw.length > 0) break;
   }
 
+  if (raw.length === 0) {
+    // 재시도로도 안 되는 이유가 로딩 지연인지, 봇 차단/리다이렉트인지 다음 실행
+    // 로그에서 바로 판단할 수 있도록 진단 정보를 남긴다.
+    console.log(`[fmkorea] 0 posts after retries. url=${page.url()} title=${await page.title()}`);
+  }
+
   const posts = raw.map((p: any) => ({
     sourcePostId: p.sourcePostId,
     title: p.title,
