@@ -3,6 +3,8 @@
   "name": "pickchive",
   "compatibility_date": "2026-08-13",
   "compatibility_flags": ["nodejs_compat"],
+  "routes": [{ "pattern": "pickchive.com", "custom_domain": true }],
+  "workers_dev": true,
   "vars": {
     "PUBLIC_TURNSTILE_SITE_KEY": "0x4AAAAAAEPYFVPEMP--g49P"
   },

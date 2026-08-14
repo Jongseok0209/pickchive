@@ -9,7 +9,7 @@
     "dev": "astro dev",
     "build": "astro check && astro build",
     "preview": "wrangler pages dev ./dist",
-    "deploy": "astro build && wrangler pages deploy ./dist",
+    "deploy": "astro build && node scripts/patch-workers-dev.mjs && wrangler deploy",
     "sync": "astro sync",
     "astro": "astro",
     "format:check": "prettier --check .",
