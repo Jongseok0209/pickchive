@@ -109,7 +109,7 @@ export async function fetchCook82(): Promise<RawPost[]> {
         if (row) row.postedAtRaw = el.getAttribute("title");
       },
     })
-    .on("#bbs table tbody tr td.numbers", {
+    .on('#bbs table tbody tr td[class="numbers"]', {
       element() {
         if (skipCurrent) return;
         numbersSeenInRow += 1;
