@@ -14,11 +14,7 @@ export interface PostWithSite {
   crawledAt: string;
   siteSlug: string;
   siteName: string;
-  viewGrowth: number;
 }
-
-// 급상승 배지를 띄울 최소 조회수 증가량 (rank_snapshots 기준 최근 2시간 내)
-export const TRENDING_THRESHOLD = 300;
 
 export const TIME_WINDOWS = [
   { key: "3h", label: "3시간", hours: 3 },
@@ -39,7 +35,7 @@ function hoursForWindow(key: string): number {
   );
 }
 
-export type SortKey = "score" | "views" | "recommend" | "comments" | "trending";
+export type SortKey = "score" | "views" | "recommend" | "comments";
 
 function orderByClause(sort: SortKey): string {
   switch (sort) {
@@ -49,23 +45,11 @@ function orderByClause(sort: SortKey): string {
       return "p.recommend_count DESC, p.first_seen_at DESC";
     case "comments":
       return "COALESCE(p.comment_count, 0) DESC, p.first_seen_at DESC";
-    case "trending":
-      return "viewGrowth DESC, p.first_seen_at DESC";
     case "score":
     default:
       return "(p.view_count + p.recommend_count * 10) DESC, p.first_seen_at DESC";
   }
 }
-
-// 최근 2시간 내 가장 오래된 스냅샷 대비 조회수 증가량 (없으면 0 — 갓 들어온 글이거나 변화 없음)
-const VIEW_GROWTH_SUBQUERY = `
-  (p.view_count - COALESCE(
-    (SELECT rs.view_count FROM rank_snapshots rs
-     WHERE rs.post_id = p.id AND rs.crawled_at >= datetime('now', '-2 hours')
-     ORDER BY rs.crawled_at ASC LIMIT 1),
-    p.view_count
-  ))
-`;
 
 export async function getRankedPosts(options: {
   window: string;
@@ -84,8 +68,7 @@ export async function getRankedPosts(options: {
            p.comment_count as commentCount, p.category,
            p.posted_at_raw as postedAtRaw, p.first_seen_at as firstSeenAt,
            p.crawled_at as crawledAt,
-           s.slug as siteSlug, s.name as siteName,
-           ${VIEW_GROWTH_SUBQUERY} as viewGrowth
+           s.slug as siteSlug, s.name as siteName
     FROM posts p
     JOIN sites s ON p.site_id = s.id
     WHERE p.first_seen_at >= datetime('now', ?)
@@ -123,8 +106,7 @@ export async function getPostById(id: number): Promise<PostWithSite | null> {
             p.comment_count as commentCount, p.category,
             p.posted_at_raw as postedAtRaw, p.first_seen_at as firstSeenAt,
             p.crawled_at as crawledAt,
-            s.slug as siteSlug, s.name as siteName,
-            ${VIEW_GROWTH_SUBQUERY} as viewGrowth
+            s.slug as siteSlug, s.name as siteName
      FROM posts p
      JOIN sites s ON p.site_id = s.id
      WHERE p.id = ?`

@@ -1,13 +1,12 @@
 ---
 import { formatCount, formatRelativeTime, decodeEntities } from "@/lib/format";
-import { TRENDING_THRESHOLD, type PostWithSite } from "@/lib/posts";
+import { type PostWithSite } from "@/lib/posts";
 
 interface Props {
   post: PostWithSite;
 }
 
 const { post } = Astro.props;
-const isTrending = post.viewGrowth >= TRENDING_THRESHOLD;
 const relativeCrawledTime = formatRelativeTime(post.crawledAt);
 ---
 
@@ -20,13 +19,6 @@ const relativeCrawledTime = formatRelativeTime(post.crawledAt);
       {post.siteName}
     </span>
     <div class="min-w-0 flex-1">
-      {
-        isTrending && (
-          <span class="mr-1 text-sm" title={`최근 2시간 조회수 +${post.viewGrowth}`}>
-            🔥
-          </span>
-        )
-      }
       <a
         href={post.url}
         rel="noopener noreferrer nofollow"
