@@ -11,20 +11,25 @@ export function formatCount(n: number): string {
   return String(n);
 }
 
-// 상대 시간 표현 (예: "3분 전 수집", "방금 전 수집")
-export function formatRelativeTime(dateStr: string | null): string {
+// 상대 시간 표현 (예: "게시 3분 전", "방금 업데이트"). label로 무엇의 시각인지 구분한다 —
+// "게시"(first_seen_at, 기간 필터가 실제로 쓰는 기준)와 "업데이트"(crawled_at, 마지막
+// 조회수/추천수 갱신 시각)를 혼동하기 쉬워서 라벨을 붙여 명확히 구분해준다.
+export function formatElapsedLabel(
+  dateStr: string | null,
+  label: string
+): string {
   if (!dateStr) return "";
   const date = new Date(dateStr.endsWith("Z") ? dateStr : dateStr + "Z");
   const now = new Date();
   const diffSec = Math.floor((now.getTime() - date.getTime()) / 1000);
 
-  if (diffSec < 60) return "방금 수집";
+  if (diffSec < 60) return `방금 ${label}`;
   const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}분 전 수집`;
+  if (diffMin < 60) return `${label} ${diffMin}분 전`;
   const diffHour = Math.floor(diffMin / 60);
-  if (diffHour < 24) return `${diffHour}시간 전 수집`;
+  if (diffHour < 24) return `${label} ${diffHour}시간 전`;
   const diffDay = Math.floor(diffHour / 24);
-  return `${diffDay}일 전 수집`;
+  return `${label} ${diffDay}일 전`;
 }
 
 // HTML 엔티티 디코딩
@@ -44,10 +49,9 @@ export function decodeEntities(text: string | null): string {
       .replace(/&#039;/g, "'")
       .replace(/&#39;/g, "'")
       .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
-      .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(parseInt(code, 16)));
+      .replace(/&#x([0-9a-f]+);/gi, (_, code) =>
+        String.fromCharCode(parseInt(code, 16))
+      );
   }
   return decoded;
 }
-
-
-

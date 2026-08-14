@@ -1,5 +1,5 @@
 ---
-import { formatCount, formatRelativeTime, decodeEntities } from "@/lib/format";
+import { formatCount, formatElapsedLabel, decodeEntities } from "@/lib/format";
 import { type PostWithSite } from "@/lib/posts";
 
 interface Props {
@@ -7,7 +7,10 @@ interface Props {
 }
 
 const { post } = Astro.props;
-const relativeCrawledTime = formatRelativeTime(post.crawledAt);
+// "게시"는 기간 필터가 실제로 쓰는 first_seen_at 기준, "업데이트"는 조회수/추천수를
+// 마지막으로 갱신한 crawled_at 기준 — 둘을 같이 보여줘야 필터 결과랑 화면이 안 헷갈린다.
+const postedAgeLabel = formatElapsedLabel(post.firstSeenAt, "게시");
+const updatedAgeLabel = formatElapsedLabel(post.crawledAt, "업데이트");
 ---
 
 <li class="border-border border-b py-3" data-post-id={post.id}>
@@ -22,6 +25,7 @@ const relativeCrawledTime = formatRelativeTime(post.crawledAt);
       <a
         href={post.url}
         rel="noopener noreferrer nofollow"
+        data-post-title-link
         class="hover:text-accent font-medium break-words"
       >
         {decodeEntities(post.title)}
@@ -41,7 +45,12 @@ const relativeCrawledTime = formatRelativeTime(post.crawledAt);
         {post.postedAtRaw && <span>{post.postedAtRaw}</span>}
         <span>조회 {formatCount(post.viewCount)}</span>
         <span>추천 {formatCount(post.recommendCount)}</span>
-        {relativeCrawledTime && <span class="text-accent/80 font-medium">{relativeCrawledTime}</span>}
+        {postedAgeLabel && <span>{postedAgeLabel}</span>}
+        {
+          updatedAgeLabel && (
+            <span class="text-accent/80 font-medium">{updatedAgeLabel}</span>
+          )
+        }
         {post.category && <span>{post.category}</span>}
         <!--
           data-astro-reload: 뷰 트랜지션(클라이언트 라우팅)으로 이동하면 Astro의
@@ -59,4 +68,3 @@ const relativeCrawledTime = formatRelativeTime(post.crawledAt);
     </div>
   </div>
 </li>
-

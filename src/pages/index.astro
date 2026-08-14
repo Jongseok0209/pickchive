@@ -67,17 +67,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     data-next-offset={nextOffset ?? ""}
   >
     <section class="border-border border-b pt-6 pb-4">
-      <div class="relative mb-3">
-        <input
-          type="search"
-          id="search-input"
-          placeholder="글 제목으로 검색"
-          aria-label="글 제목으로 검색"
-          class="border-border bg-background focus:border-accent w-full rounded border px-3 py-2 text-sm outline-none"
-        />
-      </div>
-
-      <div id="filter-nav-group">
+      <div>
         <nav class="mb-2 flex flex-wrap gap-1" aria-label="기간 필터">
           {
             TIME_WINDOWS.map(w => (
@@ -143,6 +133,16 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
           }
         </nav>
       </div>
+
+      <div class="mt-3">
+        <input
+          type="search"
+          id="search-input"
+          placeholder="글 제목으로 검색"
+          aria-label="글 제목으로 검색"
+          class="border-border bg-background focus:border-accent w-full rounded border px-3 py-2 text-sm outline-none"
+        />
+      </div>
     </section>
 
     <ul id="post-list" class="pt-2">
@@ -180,19 +180,19 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     return String(n);
   }
 
-  function formatRelativeTime(dateStr: string | null): string {
+  function formatElapsedLabel(dateStr: string | null, label: string): string {
     if (!dateStr) return "";
     const date = new Date(dateStr.endsWith("Z") ? dateStr : dateStr + "Z");
     const now = new Date();
     const diffSec = Math.floor((now.getTime() - date.getTime()) / 1000);
 
-    if (diffSec < 60) return "방금 수집";
+    if (diffSec < 60) return `방금 ${label}`;
     const diffMin = Math.floor(diffSec / 60);
-    if (diffMin < 60) return `${diffMin}분 전 수집`;
+    if (diffMin < 60) return `${label} ${diffMin}분 전`;
     const diffHour = Math.floor(diffMin / 60);
-    if (diffHour < 24) return `${diffHour}시간 전 수집`;
+    if (diffHour < 24) return `${label} ${diffHour}시간 전`;
     const diffDay = Math.floor(diffHour / 24);
-    return `${diffDay}일 전 수집`;
+    return `${label} ${diffDay}일 전`;
   }
 
   function decodeEntities(s: string): string {
@@ -225,6 +225,48 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
       .replace(/'/g, "&#39;");
   }
 
+  // 클릭해서 읽은 글은 제목을 흐리게 표시한다. 로그인/DB 없이 이 브라우저에서만
+  // 기억하면 되는 정보라 localStorage로 충분하다. 오래된 항목은 잘라내서
+  // 무한정 커지지 않게 한다.
+  const READ_POSTS_KEY = "pc-read-posts";
+  const MAX_READ_POSTS = 500;
+  const READ_LINK_CLASS = "text-foreground/40";
+
+  function getReadIds(): string[] {
+    try {
+      const raw = localStorage.getItem(READ_POSTS_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function markPostRead(id: string): void {
+    try {
+      const ids = getReadIds().filter(existing => existing !== id);
+      ids.push(id);
+      if (ids.length > MAX_READ_POSTS) {
+        ids.splice(0, ids.length - MAX_READ_POSTS);
+      }
+      localStorage.setItem(READ_POSTS_KEY, JSON.stringify(ids));
+    } catch {
+      // localStorage 접근 불가(프라이빗 모드 등)해도 기능 자체는 계속 동작
+    }
+  }
+
+  function applyReadStyles(root: HTMLElement): void {
+    const readIds = new Set(getReadIds());
+    if (readIds.size === 0) return;
+    root.querySelectorAll<HTMLElement>("li[data-post-id]").forEach(li => {
+      const id = li.dataset.postId;
+      if (!id || !readIds.has(id)) return;
+      li.querySelector<HTMLAnchorElement>(
+        "[data-post-title-link]"
+      )?.classList.add(READ_LINK_CLASS);
+    });
+  }
+
   interface Post {
     id: number;
     title: string;
@@ -235,6 +277,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     commentCount: number | null;
     category: string | null;
     postedAtRaw: string | null;
+    firstSeenAt: string;
     crawledAt: string;
     siteSlug: string;
     siteName: string;
@@ -247,10 +290,12 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
       metaParts.push(`<span>${escapeHtml(post.postedAtRaw)}</span>`);
     metaParts.push(`<span>조회 ${formatCount(post.viewCount)}</span>`);
     metaParts.push(`<span>추천 ${formatCount(post.recommendCount)}</span>`);
-    const relTime = formatRelativeTime(post.crawledAt);
-    if (relTime)
+    const postedAgeLabel = formatElapsedLabel(post.firstSeenAt, "게시");
+    if (postedAgeLabel) metaParts.push(`<span>${postedAgeLabel}</span>`);
+    const updatedAgeLabel = formatElapsedLabel(post.crawledAt, "업데이트");
+    if (updatedAgeLabel)
       metaParts.push(
-        `<span class="text-accent/80 font-medium">${relTime}</span>`
+        `<span class="text-accent/80 font-medium">${updatedAgeLabel}</span>`
       );
     if (post.category)
       metaParts.push(`<span>${escapeHtml(post.category)}</span>`);
@@ -266,7 +311,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
       <div class="flex items-start gap-2">
         <span class="bg-muted text-foreground/70 shrink-0 rounded px-1.5 py-0.5 text-xs font-medium" data-site="${post.siteSlug}">${escapeHtml(post.siteName)}</span>
         <div class="min-w-0 flex-1">
-          <a href="${escapeHtml(post.url)}" rel="noopener noreferrer nofollow" class="hover:text-accent font-medium break-words">${escapeHtml(post.title)}</a>
+          <a href="${escapeHtml(post.url)}" rel="noopener noreferrer nofollow" data-post-title-link class="hover:text-accent font-medium break-words">${escapeHtml(post.title)}</a>
           ${commentBadge}
           <div class="text-foreground/60 mt-1 flex flex-wrap gap-x-2 text-xs">${metaParts.join("")}</div>
         </div>
@@ -289,17 +334,39 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   // 원래 위치를 덮어써버린다. 복원은 우리가 직접 하므로 브라우저 것은 끈다.
   if ("scrollRestoration" in history) history.scrollRestoration = "manual";
 
+  // 외부 사이트로 나갔다가 뒤로가기하면 브라우저가 페이지를 완전히 새로 불러오지
+  // 않고 bfcache(떠날 때 DOM을 그대로 얼려뒀다가 그대로 되살리는 캐시)에서
+  // 복원하는 경우가 있다(실기기, 특히 모바일 Safari에서 흔함). 이때는
+  // astro:page-load가 다시 발생하지 않아 아래 restoreFeedState가 아예 안
+  // 불리는데, 방금 껐던 브라우저 자체 스크롤 복원도 안 되니 스크롤이 맨 위로
+  // 보인다 — DOM(글 개수)은 bfcache가 그대로 들고 있으니 스크롤 위치만
+  // 직접 다시 잡아주면 된다. bfcache 복원 시에는 반드시 pageshow가
+  // event.persisted=true로 발생한다(모든 주요 브라우저에서 보장됨).
+  window.addEventListener("pageshow", e => {
+    if (!e.persisted) return; // 일반 로드는 astro:page-load 쪽이 처리
+    let saved: { path: string; scrollY: number } | null = null;
+    try {
+      const raw = sessionStorage.getItem(FEED_STATE_KEY);
+      saved = raw ? JSON.parse(raw) : null;
+    } catch {
+      saved = null;
+    }
+    if (!saved || saved.path !== location.pathname + location.search) return;
+    window.scrollTo(0, saved.scrollY);
+  });
+
   // 복원이 진행되는 동안에는 저장하지 않는다. 복원 중 발생하는 스크롤/로드가
   // 저장된 목표값(원래 보던 위치)을 덮어쓰면 복원 자체가 무의미해진다.
   let restoringFeed = false;
   let feedListeners: AbortController | undefined;
 
-  // 검색 중에는 목록이 "인기글 피드"가 아니라 검색 결과라서, 여기서 저장해버리면
-  // 나중에 무관한 피드 재방문 때 엉뚱한 개수만큼 미리 불러오려 든다. 검색 중엔 저장을 건너뛴다.
+  // 검색 중이었는지/검색어가 뭐였는지도 같이 저장해야, 검색 결과 글을 눌렀다가
+  // 뒤로가기했을 때 기본 목록이 아니라 그 검색 결과로 복원할 수 있다.
   let searchModeActive = false;
+  let searchQuery = "";
 
   function saveFeedState(list: HTMLUListElement) {
-    if (restoringFeed || searchModeActive) return;
+    if (restoringFeed) return;
     try {
       sessionStorage.setItem(
         FEED_STATE_KEY,
@@ -307,6 +374,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
           path: location.pathname + location.search,
           itemCount: list.children.length,
           scrollY: window.scrollY,
+          query: searchModeActive ? searchQuery : "",
         })
       );
     } catch {
@@ -321,28 +389,42 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     const loadingEl = document.querySelector<HTMLElement>("#loading-indicator");
     if (!main || !list || !sentinel || !loadingEl) return;
 
+    applyReadStyles(list);
+
     let nextOffset: number | null = main.dataset.nextOffset
       ? Number(main.dataset.nextOffset)
       : null;
     let loading = false;
-    let searchQuery = "";
+
+    // 검색 관련 상태/함수를 restoreFeedState보다 먼저 선언해야, 뒤로가기 복원 시
+    // 저장된 검색어로 runSearch를 곧바로 이어 부를 수 있다.
+    const searchInput =
+      document.querySelector<HTMLInputElement>("#search-input");
+    let feedSnapshotHTML = "";
+    let feedNextOffset: number | null = null;
+
+    // 검색 중이어도 현재 화면에 걸려있는 기간/정렬/사이트 필터는 그대로 유지한 채
+    // 그 안에서만 제목 검색을 한다(별도 검색 모드가 아니라 같은 필터의 연장선).
+    function currentFilterParams(offset: number): URLSearchParams {
+      const params = new URLSearchParams({
+        window: main!.dataset.window ?? "24h",
+        sort: main!.dataset.sort ?? "score",
+        offset: String(offset),
+      });
+      if (main!.dataset.site) params.set("site", main!.dataset.site);
+      if (searchModeActive) params.set("q", searchQuery);
+      return params;
+    }
 
     async function loadMore(): Promise<boolean> {
       if (loading || nextOffset === null) return false;
       loading = true;
       loadingEl!.classList.remove("hidden");
 
-      const params = new URLSearchParams({ offset: String(nextOffset) });
-      if (searchModeActive) {
-        params.set("q", searchQuery);
-      } else {
-        params.set("window", main!.dataset.window ?? "24h");
-        params.set("sort", main!.dataset.sort ?? "score");
-        if (main!.dataset.site) params.set("site", main!.dataset.site);
-      }
-
       try {
-        const res = await fetch(`/api/posts?${params.toString()}`);
+        const res = await fetch(
+          `/api/posts?${currentFilterParams(nextOffset)}`
+        );
         const data = (await res.json()) as {
           posts: Post[];
           nextOffset: number | null;
@@ -351,6 +433,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
           "beforeend",
           data.posts.map(p => renderRow(p)).join("")
         );
+        applyReadStyles(list!);
         nextOffset = data.nextOffset;
         if (nextOffset === null) observer.disconnect();
         return data.posts.length > 0;
@@ -375,8 +458,12 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     // 0으로 되돌아가는 문제가 있었다(실제 재현 후 확인). 그래서 복원이 끝날
     // 때까지 observer를 붙이지 않는다.
     async function restoreFeedState(): Promise<void> {
-      let saved: { path: string; itemCount: number; scrollY: number } | null =
-        null;
+      let saved: {
+        path: string;
+        itemCount: number;
+        scrollY: number;
+        query?: string;
+      } | null = null;
       try {
         const raw = sessionStorage.getItem(FEED_STATE_KEY);
         saved = raw ? JSON.parse(raw) : null;
@@ -386,6 +473,14 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
       if (!saved || saved.path !== location.pathname + location.search) return;
 
       restoringFeed = true;
+
+      if (saved.query) {
+        // 검색 결과 글을 눌렀다가 돌아온 경우: 기본 목록이 아니라 그 검색을
+        // 먼저 다시 실행한 뒤, 그 결과 기준으로 이어서 더 불러온다.
+        if (searchInput) searchInput.value = saved.query;
+        await runSearch(saved.query);
+      }
+
       while (list!.children.length < saved.itemCount) {
         const gotMore = await loadMore();
         if (!gotMore) break;
@@ -434,41 +529,43 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     list!.addEventListener(
       "click",
       e => {
-        if ((e.target as HTMLElement).closest("a")) saveFeedState(list!);
+        const link = (e.target as HTMLElement).closest("a");
+        if (!link) return;
+        saveFeedState(list!);
+
+        if (link.matches("[data-post-title-link]")) {
+          const id =
+            link.closest<HTMLElement>("li[data-post-id]")?.dataset.postId;
+          if (id) {
+            markPostRead(id);
+            link.classList.add(READ_LINK_CLASS);
+          }
+        }
       },
       { capture: true, signal }
     );
 
-    // 검색: 페이지 이동 없이 같은 화면에서 목록만 검색 결과로 바꿔치기한다.
-    const searchInput =
-      document.querySelector<HTMLInputElement>("#search-input");
-    const filterNavGroup =
-      document.querySelector<HTMLElement>("#filter-nav-group");
-    let feedSnapshotHTML = "";
-    let feedNextOffset: number | null = null;
-
+    // 검색: 페이지 이동 없이 같은 화면에서, 지금 걸려있는 기간/정렬/사이트
+    // 필터 안에서만 목록을 검색 결과로 바꿔치기한다.
     function emptySearchResultHTML(query: string): string {
       return `<li class="text-foreground/60 py-12 text-center">"${escapeHtml(query)}" 검색 결과가 없어요.</li>`;
     }
 
     async function runSearch(query: string): Promise<void> {
       if (!searchModeActive) {
-        // 검색 시작 시점의 피드(스크롤로 더 불러온 것까지 포함)를 스냅샷해뒀다가
+        // 검색 시작 시점의 목록(스크롤로 더 불러온 것까지 포함)을 스냅샷해뒀다가
         // 검색어를 지우면 원래 보던 그대로 되돌려준다.
         feedSnapshotHTML = list!.innerHTML;
         feedNextOffset = nextOffset;
       }
       searchModeActive = true;
       searchQuery = query;
-      filterNavGroup?.classList.add("hidden");
       observer.disconnect();
       loading = true;
       loadingEl!.classList.remove("hidden");
 
       try {
-        const res = await fetch(
-          `/api/posts?${new URLSearchParams({ q: query, offset: "0" })}`
-        );
+        const res = await fetch(`/api/posts?${currentFilterParams(0)}`);
         const data = (await res.json()) as {
           posts: Post[];
           nextOffset: number | null;
@@ -476,21 +573,25 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
         list!.innerHTML = data.posts.length
           ? data.posts.map(p => renderRow(p)).join("")
           : emptySearchResultHTML(query);
+        applyReadStyles(list!);
         nextOffset = data.nextOffset;
       } catch {
         // 네트워크 오류 시 다음 입력에서 재시도
       } finally {
         loading = false;
         loadingEl!.classList.add("hidden");
-        if (nextOffset !== null) observer.observe(sentinel!);
+        // 뒤로가기 복원 중에는 restoreFeedState가 끝난 뒤 한 번에 observer를
+        // 붙인다 — 여기서 미리 붙이면 목표 개수까지 불러오는 도중에 observer가
+        // 동시에 더 불러와버려 개수가 목표를 넘어서는 문제가 재현된다.
+        if (nextOffset !== null && !restoringFeed) observer.observe(sentinel!);
       }
     }
 
     function exitSearch(): void {
       searchModeActive = false;
       searchQuery = "";
-      filterNavGroup?.classList.remove("hidden");
       list!.innerHTML = feedSnapshotHTML;
+      applyReadStyles(list!);
       nextOffset = feedNextOffset;
       observer.disconnect();
       if (nextOffset !== null) observer.observe(sentinel!);
@@ -508,6 +609,68 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
         }, 300);
       },
       { signal }
+    );
+
+    // 검색 중에 기간/정렬/사이트 필터를 누르면, 원래는 그냥 일반 링크라 페이지가
+    // 통째로 새로고침되면서 검색어가 날아간다. 검색 중일 때는 그 이동을 막고
+    // 같은 검색어를 유지한 채 새 필터로 다시 검색한다(검색 중이 아니면 평소처럼
+    // 그냥 링크 이동하게 둔다 — 기존에 검증된 동작을 안 건드리기 위해).
+    function wireFilterNav(
+      ariaLabel: string,
+      datasetKey: "window" | "sort" | "site",
+      defaultValue: string,
+      activeClasses: string[],
+      inactiveClasses: string[]
+    ) {
+      const nav = document.querySelector<HTMLElement>(
+        `nav[aria-label="${ariaLabel}"]`
+      );
+      if (!nav) return;
+      nav.addEventListener(
+        "click",
+        e => {
+          const link = (e.target as HTMLElement).closest("a");
+          if (!link || !nav.contains(link)) return;
+          if (!searchModeActive) return; // 검색 중이 아니면 원래대로 페이지 이동
+
+          e.preventDefault();
+          const targetUrl = new URL(link.href);
+          const value = targetUrl.searchParams.get(datasetKey) ?? defaultValue;
+          main!.dataset[datasetKey] = value;
+          history.replaceState(history.state, "", targetUrl);
+
+          nav.querySelectorAll("a").forEach(a => {
+            const isTarget = a === link;
+            a.classList.remove(...activeClasses, ...inactiveClasses);
+            a.classList.add(...(isTarget ? activeClasses : inactiveClasses));
+          });
+
+          void runSearch(searchQuery);
+        },
+        { signal }
+      );
+    }
+
+    wireFilterNav(
+      "기간 필터",
+      "window",
+      "24h",
+      ["bg-accent", "text-accent-foreground"],
+      ["bg-muted", "hover:text-accent"]
+    );
+    wireFilterNav(
+      "정렬 기준",
+      "sort",
+      "score",
+      ["border-accent", "text-accent", "border"],
+      ["border-border", "text-foreground/60", "hover:text-accent", "border"]
+    );
+    wireFilterNav(
+      "사이트 필터",
+      "site",
+      "",
+      ["border-accent", "text-accent", "border"],
+      ["border-border", "text-foreground/60", "hover:text-accent", "border"]
     );
   }
 

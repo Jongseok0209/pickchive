@@ -4,7 +4,7 @@ import Header from "@/components/Header.astro";
 import Footer from "@/components/Footer.astro";
 import { getPostById } from "@/lib/posts";
 import { getComments } from "@/lib/comments";
-import { formatCount, formatRelativeTime, decodeEntities } from "@/lib/format";
+import { formatCount, formatElapsedLabel, decodeEntities } from "@/lib/format";
 
 export const prerender = false;
 
@@ -19,18 +19,26 @@ const comments = await getComments(post.id);
 const username = await Astro.session?.get("username");
 const error = Astro.url.searchParams.get("error");
 const notice = Astro.url.searchParams.get("notice");
-const relativeCrawledTime = formatRelativeTime(post.crawledAt);
+const postedAgeLabel = formatElapsedLabel(post.firstSeenAt, "게시");
+const updatedAgeLabel = formatElapsedLabel(post.crawledAt, "업데이트");
 ---
 
 <Layout title={decodeEntities(post.title)}>
   <Header />
   <main id="main-content" class="app-layout my-1 max-w-2xl">
     <article class="border-border border-b py-6">
-      <span class="bg-muted text-foreground/70 rounded px-1.5 py-0.5 text-xs font-medium">
+      <span
+        class="bg-muted text-foreground/70 rounded px-1.5 py-0.5 text-xs font-medium"
+      >
         {post.siteName}
       </span>
       <h1 class="mt-2 text-xl font-bold sm:text-2xl">
-        <a href={post.url} target="_blank" rel="noopener noreferrer nofollow" class="hover:text-accent">
+        <a
+          href={post.url}
+          target="_blank"
+          rel="noopener noreferrer nofollow"
+          class="hover:text-accent"
+        >
           {decodeEntities(post.title)}
         </a>
       </h1>
@@ -39,7 +47,12 @@ const relativeCrawledTime = formatRelativeTime(post.crawledAt);
         {post.postedAtRaw && <span>{post.postedAtRaw}</span>}
         <span>조회 {formatCount(post.viewCount)}</span>
         <span>추천 {formatCount(post.recommendCount)}</span>
-        {relativeCrawledTime && <span class="text-accent/80 font-medium">{relativeCrawledTime}</span>}
+        {postedAgeLabel && <span>{postedAgeLabel}</span>}
+        {
+          updatedAgeLabel && (
+            <span class="text-accent/80 font-medium">{updatedAgeLabel}</span>
+          )
+        }
       </div>
       <a
         href={post.url}
@@ -62,7 +75,11 @@ const relativeCrawledTime = formatRelativeTime(post.crawledAt);
 
       {
         username ? (
-          <form method="POST" action="/api/comments" class="mb-6 flex flex-col gap-2">
+          <form
+            method="POST"
+            action="/api/comments"
+            class="mb-6 flex flex-col gap-2"
+          >
             <input type="hidden" name="postId" value={post.id} />
             <textarea
               name="content"
@@ -81,7 +98,11 @@ const relativeCrawledTime = formatRelativeTime(post.crawledAt);
           </form>
         ) : (
           <p class="text-foreground/60 mb-6 text-sm">
-            댓글을 작성하려면 <a href="/login" class="text-accent underline">로그인</a>이 필요해요.
+            댓글을 작성하려면{" "}
+            <a href="/login" class="text-accent underline">
+              로그인
+            </a>
+            이 필요해요.
           </p>
         )
       }
@@ -99,7 +120,10 @@ const relativeCrawledTime = formatRelativeTime(post.crawledAt);
                 <form method="POST" action="/api/reports" class="mt-1">
                   <input type="hidden" name="commentId" value={c.id} />
                   <input type="hidden" name="postId" value={post.id} />
-                  <button type="submit" class="text-foreground/40 hover:text-red-500 text-xs">
+                  <button
+                    type="submit"
+                    class="text-foreground/40 text-xs hover:text-red-500"
+                  >
                     🚩 신고
                   </button>
                 </form>
