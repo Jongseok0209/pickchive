@@ -20,6 +20,15 @@ const username = await Astro.session?.get("username");
 const error = Astro.url.searchParams.get("error");
 const notice = Astro.url.searchParams.get("notice");
 const relativeCrawledTime = formatRelativeTime(post.crawledAt);
+
+// 실험: 홈 피드에서 제목을 클릭하면 이 페이지를 거쳐 곧바로 원문으로 이동시키고,
+// 뒤로가기를 누르면 이 페이지(댓글)가 다시 보이게 한다("바운스" 방식).
+// ?auto=1 이 있을 때만 시도하고, 브라우저 뒤로가기/앞으로가기로 들어온 경우는
+// 리다이렉트하지 않는다(그래야 뒤로가기로 댓글을 볼 수 있음).
+// data-astro-reload로 항상 완전한 페이지 로드를 강제해야 아래
+// performance.getEntriesByType("navigation")[0].type 판별이 정확해진다
+// (Astro 클라이언트 라우터가 가로채면 이 API가 신뢰할 수 없어짐).
+const autoBounce = Astro.url.searchParams.get("auto") === "1";
 ---
 
 <Layout title={decodeEntities(post.title)}>
@@ -118,4 +127,17 @@ const relativeCrawledTime = formatRelativeTime(post.crawledAt);
     </section>
   </main>
   <Footer />
+
+  {
+    autoBounce && (
+      <script define:vars={{ redirectUrl: post.url }} is:inline>
+        (function () {
+          const navEntries = performance.getEntriesByType("navigation");
+          const navType = navEntries.length > 0 ? navEntries[0].type : "navigate";
+          if (navType === "back_forward") return;
+          window.location.href = redirectUrl;
+        })();
+      </script>
+    )
+  }
 </Layout>
