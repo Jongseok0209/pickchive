@@ -19,66 +19,71 @@ export async function upsertPosts(
 ): Promise<void> {
   if (posts.length === 0) return;
 
-  const upsertStmt = db.prepare(`
-    INSERT INTO posts (
-      site_id, source_post_id, title, url, author,
-      view_count, recommend_count, comment_count, category,
-      thumbnail_url, posted_at_raw, first_seen_at, crawled_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-    ON CONFLICT (site_id, source_post_id) DO UPDATE SET
-      title = excluded.title,
-      view_count = excluded.view_count,
-      recommend_count = excluded.recommend_count,
-      comment_count = excluded.comment_count,
-      category = excluded.category,
-      thumbnail_url = excluded.thumbnail_url,
-      crawled_at = datetime('now')
-  `);
+  // D1 SQL 변수 제한(100개) 초과 방지를 위해 40개 단위 둔크 분할
+  const CHUNK_SIZE = 40;
+  for (let i = 0; i < posts.length; i += CHUNK_SIZE) {
+    const chunk = posts.slice(i, i + CHUNK_SIZE);
 
-  const upsertBatch = posts.map(p =>
-    upsertStmt.bind(
-      siteId,
-      p.sourcePostId,
-      p.title,
-      p.url,
-      p.author,
-      p.viewCount,
-      p.recommendCount,
-      p.commentCount,
-      p.category,
-      p.thumbnailUrl,
-      p.postedAtRaw
-    )
-  );
-  await db.batch(upsertBatch);
+    const upsertStmt = db.prepare(`
+      INSERT INTO posts (
+        site_id, source_post_id, title, url, author,
+        view_count, recommend_count, comment_count, category,
+        thumbnail_url, posted_at_raw, first_seen_at, crawled_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      ON CONFLICT (site_id, source_post_id) DO UPDATE SET
+        title = excluded.title,
+        view_count = excluded.view_count,
+        recommend_count = excluded.recommend_count,
+        comment_count = excluded.comment_count,
+        category = excluded.category,
+        thumbnail_url = excluded.thumbnail_url,
+        crawled_at = datetime('now')
+    `);
 
-  // rank_snapshots: 이번 크롤링 배치 내 조회수 기준 순위 기록 (급상승 계산용)
-  const ranked = [...posts].sort((a, b) => b.viewCount - a.viewCount);
-  const placeholders = posts.map(() => "?").join(",");
-  const idRows = await db
-    .prepare(
-      `SELECT id, source_post_id FROM posts WHERE site_id = ? AND source_post_id IN (${placeholders})`
-    )
-    .bind(siteId, ...posts.map(p => p.sourcePostId))
-    .all<{ id: number; source_post_id: string }>();
+    const upsertBatch = chunk.map(p =>
+      upsertStmt.bind(
+        siteId,
+        p.sourcePostId,
+        p.title,
+        p.url,
+        p.author,
+        p.viewCount,
+        p.recommendCount,
+        p.commentCount,
+        p.category,
+        p.thumbnailUrl,
+        p.postedAtRaw
+      )
+    );
+    await db.batch(upsertBatch);
 
-  const idBySourcePostId = new Map(
-    idRows.results.map(r => [r.source_post_id, r.id])
-  );
+    const ranked = [...chunk].sort((a, b) => b.viewCount - a.viewCount);
+    const placeholders = chunk.map(() => "?").join(",");
+    const idRows = await db
+      .prepare(
+        `SELECT id, source_post_id FROM posts WHERE site_id = ? AND source_post_id IN (${placeholders})`
+      )
+      .bind(siteId, ...chunk.map(p => p.sourcePostId))
+      .all<{ id: number; source_post_id: string }>();
 
-  const snapshotStmt = db.prepare(
-    `INSERT INTO rank_snapshots (post_id, crawled_at, rank, view_count) VALUES (?, datetime('now'), ?, ?)`
-  );
-  const snapshotBatch = ranked
-    .map((p, idx) => {
-      const postId = idBySourcePostId.get(p.sourcePostId);
-      if (!postId) return null;
-      return snapshotStmt.bind(postId, idx + 1, p.viewCount);
-    })
-    .filter((s): s is D1PreparedStatement => s !== null);
+    const idBySourcePostId = new Map(
+      idRows.results.map(r => [r.source_post_id, r.id])
+    );
 
-  if (snapshotBatch.length > 0) {
-    await db.batch(snapshotBatch);
+    const snapshotStmt = db.prepare(
+      `INSERT INTO rank_snapshots (post_id, crawled_at, rank, view_count) VALUES (?, datetime('now'), ?, ?)`
+    );
+    const snapshotBatch = ranked
+      .map((p, idx) => {
+        const postId = idBySourcePostId.get(p.sourcePostId);
+        if (!postId) return null;
+        return snapshotStmt.bind(postId, idx + 1, p.viewCount);
+      })
+      .filter((s): s is D1PreparedStatement => s !== null);
+
+    if (snapshotBatch.length > 0) {
+      await db.batch(snapshotBatch);
+    }
   }
 }
 

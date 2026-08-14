@@ -169,11 +169,47 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     return String(n);
   }
 
+  function formatRelativeTime(dateStr: string | null): string {
+    if (!dateStr) return "";
+    const date = new Date(dateStr.endsWith("Z") ? dateStr : dateStr + "Z");
+    const now = new Date();
+    const diffSec = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+    if (diffSec < 60) return "방금 수집";
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}분 전 수집`;
+    const diffHour = Math.floor(diffMin / 60);
+    if (diffHour < 24) return `${diffHour}시간 전 수집`;
+    const diffDay = Math.floor(diffHour / 24);
+    return `${diffDay}일 전 수집`;
+  }
+
+  function decodeEntities(s: string): string {
+    let decoded = s;
+    let prev = "";
+    while (decoded !== prev) {
+      prev = decoded;
+      decoded = decoded
+        .replace(/&quot;/gi, '"')
+        .replace(/&apos;/gi, "'")
+        .replace(/&amp;/gi, "&")
+        .replace(/&lt;/gi, "<")
+        .replace(/&gt;/gi, ">")
+        .replace(/&#039;/g, "'")
+        .replace(/&#39;/g, "'")
+        .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+        .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(parseInt(code, 16)));
+    }
+    return decoded;
+  }
+
   function escapeHtml(s: string): string {
-    return s.replace(
-      /[&<>"']/g,
-      c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!
-    );
+    return decodeEntities(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   interface Post {
@@ -186,6 +222,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     commentCount: number | null;
     category: string | null;
     postedAtRaw: string | null;
+    crawledAt: string;
     siteSlug: string;
     siteName: string;
     viewGrowth: number;
@@ -197,6 +234,8 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     if (post.postedAtRaw) metaParts.push(`<span>${escapeHtml(post.postedAtRaw)}</span>`);
     metaParts.push(`<span>조회 ${formatCount(post.viewCount)}</span>`);
     metaParts.push(`<span>추천 ${formatCount(post.recommendCount)}</span>`);
+    const relTime = formatRelativeTime(post.crawledAt);
+    if (relTime) metaParts.push(`<span class="text-accent/80 font-medium">${relTime}</span>`);
     if (post.category) metaParts.push(`<span>${escapeHtml(post.category)}</span>`);
     metaParts.push(
       `<a href="/p/${post.id}#comments" class="text-accent hover:underline">댓글 보기</a>`

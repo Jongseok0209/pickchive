@@ -23,9 +23,11 @@ export async function fetchInven(): Promise<RawPost[]> {
   let viewText = "";
   let capturingReco = false;
   let recoText = "";
+  let capturingComment = false;
+  let commentText = "";
 
   const rewriter = new HTMLRewriter()
-    .on("table.thumbnail tbody tr", {
+    .on("tr", {
       element(el) {
         const cls = el.getAttribute("class") ?? "";
         skipCurrent = cls.includes("notice");
@@ -43,14 +45,14 @@ export async function fetchInven(): Promise<RawPost[]> {
         });
       },
     })
-    .on("table.thumbnail tbody tr td.thumb img", {
+    .on("tr td.thumb img", {
       element(el) {
         if (skipCurrent) return;
         const row = rows[rows.length - 1];
         if (row && !row.thumbnailUrl) row.thumbnailUrl = el.getAttribute("src");
       },
     })
-    .on("table.thumbnail tbody tr a.subject-link", {
+    .on("tr a.subject-link", {
       element(el) {
         if (skipCurrent) return;
         const row = rows[rows.length - 1];
@@ -74,7 +76,7 @@ export async function fetchInven(): Promise<RawPost[]> {
         }
       },
     })
-    .on("table.thumbnail tbody tr a.subject-link span.category", {
+    .on("tr a.subject-link span.category", {
       element(el) {
         if (skipCurrent) return;
         inCategory = true;
@@ -85,7 +87,7 @@ export async function fetchInven(): Promise<RawPost[]> {
         });
       },
     })
-    .on("table.thumbnail tbody tr td.user span.layerNickName", {
+    .on("tr td.user span.layerNickName", {
       element() {
         if (skipCurrent) return;
         capturingUser = true;
@@ -101,7 +103,7 @@ export async function fetchInven(): Promise<RawPost[]> {
         }
       },
     })
-    .on("table.thumbnail tbody tr td.date", {
+    .on("tr td.date", {
       element() {
         if (skipCurrent) return;
         capturingDate = true;
@@ -117,7 +119,7 @@ export async function fetchInven(): Promise<RawPost[]> {
         }
       },
     })
-    .on("table.thumbnail tbody tr td.view", {
+    .on("tr td.view", {
       element() {
         if (skipCurrent) return;
         capturingView = true;
@@ -133,7 +135,7 @@ export async function fetchInven(): Promise<RawPost[]> {
         }
       },
     })
-    .on("table.thumbnail tbody tr td.reco", {
+    .on("tr td.reco", {
       element() {
         if (skipCurrent) return;
         capturingReco = true;
@@ -146,6 +148,22 @@ export async function fetchInven(): Promise<RawPost[]> {
           const row = rows[rows.length - 1];
           if (row) row.recommendCount = parseIntSafe(recoText);
           capturingReco = false;
+        }
+      },
+    })
+    .on("tr span.con-comment", {
+      element() {
+        if (skipCurrent) return;
+        capturingComment = true;
+        commentText = "";
+      },
+      text(chunk) {
+        if (!capturingComment || skipCurrent) return;
+        commentText += chunk.text;
+        if (chunk.lastInTextNode) {
+          const row = rows[rows.length - 1];
+          if (row) row.commentCount = parseIntSafe(commentText.replace(/[[\]]/g, ""));
+          capturingComment = false;
         }
       },
     });

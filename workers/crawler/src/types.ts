@@ -29,7 +29,16 @@ export async function fetchHtml(url: string): Promise<Response> {
 
 export function parseIntSafe(text: string | null | undefined): number {
   if (!text) return 0;
-  const cleaned = text.replace(/[^0-9-]/g, "");
+  const str = text.trim();
+  if (/[0-9.]+\s*M/i.test(str)) {
+    const match = str.match(/([0-9.]+)\s*M/i);
+    if (match) return Math.round(parseFloat(match[1]) * 1000000);
+  }
+  if (/[0-9.]+\s*K/i.test(str)) {
+    const match = str.match(/([0-9.]+)\s*K/i);
+    if (match) return Math.round(parseFloat(match[1]) * 1000);
+  }
+  const cleaned = str.replace(/[^0-9-]/g, "");
   const n = parseInt(cleaned, 10);
   return Number.isFinite(n) ? n : 0;
 }

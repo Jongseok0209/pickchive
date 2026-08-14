@@ -24,3 +24,44 @@ jobs:
       - name: Crawl inven
         continue-on-error: true
         run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=inven"
+      - name: Crawl todayhumor
+        continue-on-error: true
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=todayhumor"
+      - name: Crawl ddanzi
+        continue-on-error: true
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=ddanzi"
+      - name: Crawl humoruniv
+        continue-on-error: true
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=humoruniv"
+      - name: Crawl etoland
+        continue-on-error: true
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=etoland"
+      - name: Crawl mlbpark
+        continue-on-error: true
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=mlbpark"
+      - name: Crawl slrclub
+        continue-on-error: true
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=slrclub"
+      - name: Crawl damoang
+        continue-on-error: true
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=damoang"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Playwright & dependencies
+        run: |
+          npm install playwright tsx
+          npx playwright install chromium --with-deps
+
+      - name: Crawl protected sites (fmkorea & ruliweb) via Playwright
+        continue-on-error: true
+        run: npx tsx scripts/crawl_protected.ts
+
+
+

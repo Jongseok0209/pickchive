@@ -4,7 +4,7 @@ import Header from "@/components/Header.astro";
 import Footer from "@/components/Footer.astro";
 import { getPostById } from "@/lib/posts";
 import { getComments } from "@/lib/comments";
-import { formatCount } from "@/lib/format";
+import { formatCount, formatRelativeTime, decodeEntities } from "@/lib/format";
 
 export const prerender = false;
 
@@ -19,9 +19,10 @@ const comments = await getComments(post.id);
 const username = await Astro.session?.get("username");
 const error = Astro.url.searchParams.get("error");
 const notice = Astro.url.searchParams.get("notice");
+const relativeCrawledTime = formatRelativeTime(post.crawledAt);
 ---
 
-<Layout title={post.title}>
+<Layout title={decodeEntities(post.title)}>
   <Header />
   <main id="main-content" class="app-layout my-1 max-w-2xl">
     <article class="border-border border-b py-6">
@@ -30,14 +31,15 @@ const notice = Astro.url.searchParams.get("notice");
       </span>
       <h1 class="mt-2 text-xl font-bold sm:text-2xl">
         <a href={post.url} target="_blank" rel="noopener noreferrer nofollow" class="hover:text-accent">
-          {post.title}
+          {decodeEntities(post.title)}
         </a>
       </h1>
       <div class="text-foreground/60 mt-2 flex flex-wrap gap-x-3 text-sm">
-        {post.author && <span>{post.author}</span>}
+        {post.author && <span>{decodeEntities(post.author)}</span>}
         {post.postedAtRaw && <span>{post.postedAtRaw}</span>}
         <span>조회 {formatCount(post.viewCount)}</span>
         <span>추천 {formatCount(post.recommendCount)}</span>
+        {relativeCrawledTime && <span class="text-accent/80 font-medium">{relativeCrawledTime}</span>}
       </div>
       <a
         href={post.url}

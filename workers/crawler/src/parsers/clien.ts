@@ -71,7 +71,7 @@ export async function fetchClien(): Promise<RawPost[]> {
         }
       },
     })
-    .on('div[data-role="list-like-count"] span', {
+    .on('div[data-role="list-like-count"] span, div.list_symph span', {
       element() {
         capturingRecommend = true;
         currentRecommendText = "";

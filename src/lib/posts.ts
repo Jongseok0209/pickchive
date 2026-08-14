@@ -11,6 +11,7 @@ export interface PostWithSite {
   category: string | null;
   postedAtRaw: string | null;
   firstSeenAt: string;
+  crawledAt: string;
   siteSlug: string;
   siteName: string;
   viewGrowth: number;
@@ -82,6 +83,7 @@ export async function getRankedPosts(options: {
            p.view_count as viewCount, p.recommend_count as recommendCount,
            p.comment_count as commentCount, p.category,
            p.posted_at_raw as postedAtRaw, p.first_seen_at as firstSeenAt,
+           p.crawled_at as crawledAt,
            s.slug as siteSlug, s.name as siteName,
            ${VIEW_GROWTH_SUBQUERY} as viewGrowth
     FROM posts p
@@ -120,6 +122,7 @@ export async function getPostById(id: number): Promise<PostWithSite | null> {
             p.view_count as viewCount, p.recommend_count as recommendCount,
             p.comment_count as commentCount, p.category,
             p.posted_at_raw as postedAtRaw, p.first_seen_at as firstSeenAt,
+            p.crawled_at as crawledAt,
             s.slug as siteSlug, s.name as siteName,
             ${VIEW_GROWTH_SUBQUERY} as viewGrowth
      FROM posts p

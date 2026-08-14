@@ -1,5 +1,5 @@
 ---
-import { formatCount } from "@/lib/format";
+import { formatCount, formatRelativeTime, decodeEntities } from "@/lib/format";
 import { TRENDING_THRESHOLD, type PostWithSite } from "@/lib/posts";
 
 interface Props {
@@ -8,6 +8,7 @@ interface Props {
 
 const { post } = Astro.props;
 const isTrending = post.viewGrowth >= TRENDING_THRESHOLD;
+const relativeCrawledTime = formatRelativeTime(post.crawledAt);
 ---
 
 <li class="border-border border-b py-3" data-post-id={post.id}>
@@ -27,7 +28,7 @@ const isTrending = post.viewGrowth >= TRENDING_THRESHOLD;
         )
       }
       <a href={`/p/${post.id}`} class="hover:text-accent font-medium break-words">
-        {post.title}
+        {decodeEntities(post.title)}
       </a>
       {
         !!post.commentCount && (
@@ -44,6 +45,7 @@ const isTrending = post.viewGrowth >= TRENDING_THRESHOLD;
         {post.postedAtRaw && <span>{post.postedAtRaw}</span>}
         <span>조회 {formatCount(post.viewCount)}</span>
         <span>추천 {formatCount(post.recommendCount)}</span>
+        {relativeCrawledTime && <span class="text-accent/80 font-medium">{relativeCrawledTime}</span>}
         {post.category && <span>{post.category}</span>}
         <a href={`/p/${post.id}#comments`} class="text-accent hover:underline">
           댓글 보기
@@ -52,3 +54,4 @@ const isTrending = post.viewGrowth >= TRENDING_THRESHOLD;
     </div>
   </div>
 </li>
+
