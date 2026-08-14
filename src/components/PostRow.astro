@@ -20,7 +20,6 @@ const { post } = Astro.props;
     <div class="min-w-0 flex-1">
       <a
         href={post.url}
-        target="_blank"
         rel="noopener noreferrer nofollow"
         class="hover:text-accent font-medium break-words"
       >
@@ -28,7 +27,12 @@ const { post } = Astro.props;
       </a>
       {
         !!post.commentCount && (
-          <span class="text-accent ms-1 text-sm">[{post.commentCount}]</span>
+          <span
+            class="text-foreground/50 ms-1 text-sm"
+            title="크롤링 시점 기준 원본 댓글 수 (실시간 아님)"
+          >
+            [원본 댓글 {post.commentCount}]
+          </span>
         )
       }
       <div class="text-foreground/60 mt-1 flex flex-wrap gap-x-2 text-xs">

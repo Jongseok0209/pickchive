@@ -193,14 +193,14 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     );
 
     const commentBadge = post.commentCount
-      ? `<span class="text-accent ms-1 text-sm">[${post.commentCount}]</span>`
+      ? `<span class="text-foreground/50 ms-1 text-sm" title="크롤링 시점 기준 원본 댓글 수 (실시간 아님)">[원본 댓글 ${post.commentCount}]</span>`
       : "";
 
     return `<li class="border-border border-b py-3" data-post-id="${post.id}">
       <div class="flex items-start gap-2">
         <span class="bg-muted text-foreground/70 shrink-0 rounded px-1.5 py-0.5 text-xs font-medium" data-site="${post.siteSlug}">${escapeHtml(post.siteName)}</span>
         <div class="min-w-0 flex-1">
-          <a href="${escapeHtml(post.url)}" target="_blank" rel="noopener noreferrer nofollow" class="hover:text-accent font-medium break-words">${escapeHtml(post.title)}</a>
+          <a href="${escapeHtml(post.url)}" rel="noopener noreferrer nofollow" class="hover:text-accent font-medium break-words">${escapeHtml(post.title)}</a>
           ${commentBadge}
           <div class="text-foreground/60 mt-1 flex flex-wrap gap-x-2 text-xs">${metaParts.join("")}</div>
         </div>
