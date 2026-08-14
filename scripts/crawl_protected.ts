@@ -79,10 +79,12 @@ async function crawlFmkorea(browser: any) {
     if (raw.length > 0) break;
   }
 
+  let error: string | undefined;
   if (raw.length === 0) {
     // 재시도로도 안 되는 이유가 로딩 지연인지, 봇 차단/리다이렉트인지 다음 실행
-    // 로그에서 바로 판단할 수 있도록 진단 정보를 남긴다.
-    console.log(`[fmkorea] 0 posts after retries. url=${page.url()} title=${await page.title()}`);
+    // 로그 + /status에서 바로 판단할 수 있도록 진단 정보를 남긴다.
+    error = `0 posts after retries. url=${page.url()} title=${await page.title()}`;
+    console.log(`[fmkorea] ${error}`);
   }
 
   const posts = raw.map((p: any) => ({
@@ -100,7 +102,7 @@ async function crawlFmkorea(browser: any) {
 
   await page.close();
   console.log(`[fmkorea] Playwright found ${posts.length} posts`);
-  return { slug: "fmkorea", posts };
+  return { slug: "fmkorea", posts, error };
 }
 
 async function crawlRuliweb(browser: any) {
@@ -151,9 +153,15 @@ async function crawlRuliweb(browser: any) {
     return list;
   });
 
+  let error: string | undefined;
+  if (posts.length === 0) {
+    error = `0 posts. url=${page.url()} title=${await page.title()}`;
+    console.log(`[ruliweb] ${error}`);
+  }
+
   await page.close();
   console.log(`[ruliweb] Playwright found ${posts.length} posts`);
-  return { slug: "ruliweb", posts };
+  return { slug: "ruliweb", posts, error };
 }
 
 async function crawlDamoang(browser: any) {
@@ -214,43 +222,36 @@ async function crawlDamoang(browser: any) {
     postedAtRaw: p.dateText,
   }));
 
+  let error: string | undefined;
+  if (posts.length === 0) {
+    error = `0 posts. url=${page.url()} title=${await page.title()}`;
+    console.log(`[damoang] ${error}`);
+  }
+
   await page.close();
   console.log(`[damoang] Playwright found ${posts.length} posts`);
-  return { slug: "damoang", posts };
+  return { slug: "damoang", posts, error };
+}
+
+// 0건 수집이어도 항상 ingest를 호출해야 한다 — 예전엔 posts.length > 0일 때만
+// 호출해서, 실패(0건)한 시도는 crawl_runs에 기록조차 안 남았다. 그래서 실제로는
+// "매번 시도했다가 실패"인데 /status에는 "시도 안 함"으로 잘못 떴다(2026-08-14 확인,
+// 펨코가 IP 차단으로 매번 0건인데도 계속 "시도 안 함"으로 보이던 문제).
+async function ingest(data: { slug: string; posts: unknown[]; error?: string }) {
+  const res = await fetch(INGEST_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  console.log(`[${data.slug}] Ingest response:`, await res.text());
 }
 
 async function run() {
   const browser = await chromium.launch({ headless: true });
   try {
-    const fmData = await crawlFmkorea(browser);
-    if (fmData.posts.length > 0) {
-      const res = await fetch(INGEST_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(fmData),
-      });
-      console.log(`[fmkorea] Ingest response:`, await res.text());
-    }
-
-    const ruliData = await crawlRuliweb(browser);
-    if (ruliData.posts.length > 0) {
-      const res = await fetch(INGEST_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(ruliData),
-      });
-      console.log(`[ruliweb] Ingest response:`, await res.text());
-    }
-
-    const damoangData = await crawlDamoang(browser);
-    if (damoangData.posts.length > 0) {
-      const res = await fetch(INGEST_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(damoangData),
-      });
-      console.log(`[damoang] Ingest response:`, await res.text());
-    }
+    await ingest(await crawlFmkorea(browser));
+    await ingest(await crawlRuliweb(browser));
+    await ingest(await crawlDamoang(browser));
   } catch (err: any) {
     console.error("Playwright crawl error:", err);
   } finally {

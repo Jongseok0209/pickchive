@@ -80,28 +80,46 @@ const HTTP_CRAWL_SITES = [
   "damoang",
 ];
 
-const WORKER_ORIGIN = "https://pickchive-crawler.won0209.workers.dev";
+// scheduled()와 /crawl 라우트가 같이 쓰는 사이트별 크롤 함수 목록.
+const CRAWL_FETCHERS: Record<string, (db: Env["DB"]) => Promise<void>> = {
+  clien: db => crawlSite(db, "clien", fetchClien),
+  ppomppu: db => crawlSite(db, "ppomppu", fetchPpomppu),
+  bobaedream: db => crawlSite(db, "bobaedream", fetchBobaedream),
+  cook82: db => crawlSite(db, "cook82", fetchCook82),
+  inven: db => crawlSite(db, "inven", fetchInven),
+  todayhumor: db => crawlSite(db, "todayhumor", fetchTodayhumor),
+  ddanzi: db => crawlSite(db, "ddanzi", fetchDdanzi),
+  humoruniv: db => crawlSite(db, "humoruniv", fetchHumoruniv),
+  etoland: db => crawlSite(db, "etoland", fetchEtoland),
+  mlbpark: db => crawlSite(db, "mlbpark", fetchMlbpark),
+  slrclub: db => crawlSite(db, "slrclub", fetchSlrclub),
+  fmkorea: db => crawlSite(db, "fmkorea", fetchFmkorea),
+  damoang: db => crawlSite(db, "damoang", fetchDamoang),
+  ruliweb: db => crawlSite(db, "ruliweb", fetchRuliweb),
+};
 
 export default {
   // GitHub Actions의 schedule(*/5)은 실제로는 평균 1시간 간격으로만 실행된다
   // (2026-08-14 실측: 03:30 → 05:17 → 06:48 → 08:04 …). GitHub이 스케줄
   // 이벤트를 부하 상황에 따라 지연·병합하기 때문으로, 우리가 고칠 수 없다.
   // 그래서 Cloudflare Cron Trigger를 주 스케줄러로 되살린다.
-  // (과거 커밋 a8ac805에서 "한 번도 발화하지 않는다"는 이유로 제거했었으나,
-  //  이제 crawl_runs/health로 발화 여부를 객관적으로 검증할 수 있어 재도입.
-  //  GitHub Actions는 백업 경로로 그대로 둔다.)
+  // GitHub Actions는 백업 경로로 그대로 둔다.
   //
-  // 사이트별로 자기 자신에게 subrequest를 보내는 이유: 한 invocation에서
-  // 12개 사이트 HTML을 모두 파싱하면 CPU 한도에 걸릴 수 있는데,
-  // 요청을 나누면 각 사이트가 독립된 실행 예산을 갖는다.
+  // (2026-08-14 확인: 예전엔 사이트별로 자기 자신의 workers.dev URL에
+  //  subrequest를 보내 CPU 예산을 나눴는데, 이건 Cloudflare가 "Worker가
+  //  자기 자신의 공개 URL로 fetch()"하는 걸 루프 방지로 차단해서(에러 1042)
+  //  cron이 매번 발화는 하되 사이트마다 전부 404로 실패하고 있었다.
+  //  GitHub Actions 쪽은 외부(GitHub 러너)에서 직접 curl하는 거라 이 제약을
+  //  안 받아서 그동안 정상 동작해온 것. 그래서 subrequest 없이 같은
+  //  invocation 안에서 crawlSite를 직접 호출하는 방식으로 바꿨다.)
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     console.log(`Scheduled event triggered: ${event.cron}`);
     ctx.waitUntil(
       (async () => {
         for (const slug of HTTP_CRAWL_SITES) {
           try {
-            const res = await fetch(`${WORKER_ORIGIN}/crawl?site=${slug}`);
-            console.log(`[cron] ${slug} -> ${res.status}`);
+            await CRAWL_FETCHERS[slug](env.DB);
+            console.log(`[cron] ${slug} -> ok`);
           } catch (err: any) {
             console.log(`[cron] ${slug} -> error ${err?.message ?? err}`);
           }
@@ -115,32 +133,16 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === "/crawl") {
       const site = url.searchParams.get("site");
-      const fetchers: Record<string, () => Promise<unknown>> = {
-        clien: () => crawlSite(env.DB, "clien", fetchClien),
-        ppomppu: () => crawlSite(env.DB, "ppomppu", fetchPpomppu),
-        bobaedream: () => crawlSite(env.DB, "bobaedream", fetchBobaedream),
-        cook82: () => crawlSite(env.DB, "cook82", fetchCook82),
-        inven: () => crawlSite(env.DB, "inven", fetchInven),
-        todayhumor: () => crawlSite(env.DB, "todayhumor", fetchTodayhumor),
-        ddanzi: () => crawlSite(env.DB, "ddanzi", fetchDdanzi),
-        humoruniv: () => crawlSite(env.DB, "humoruniv", fetchHumoruniv),
-        etoland: () => crawlSite(env.DB, "etoland", fetchEtoland),
-        mlbpark: () => crawlSite(env.DB, "mlbpark", fetchMlbpark),
-        slrclub: () => crawlSite(env.DB, "slrclub", fetchSlrclub),
-        fmkorea: () => crawlSite(env.DB, "fmkorea", fetchFmkorea),
-        damoang: () => crawlSite(env.DB, "damoang", fetchDamoang),
-        ruliweb: () => crawlSite(env.DB, "ruliweb", fetchRuliweb),
-      };
-      if (!site || !fetchers[site]) {
+      if (!site || !CRAWL_FETCHERS[site]) {
         return new Response(
-          "Usage: /crawl?site=" + Object.keys(fetchers).join("|"),
+          "Usage: /crawl?site=" + Object.keys(CRAWL_FETCHERS).join("|"),
           { status: 400 }
         );
       }
       // 0건 수집이면 crawlSite가 throw한다. 지금까지는 이런 조용한 실패에도
       // 200이 나가서 GitHub Actions가 "성공"으로 넘어가버렸다 — 500으로 알린다.
       try {
-        await fetchers[site]();
+        await CRAWL_FETCHERS[site](env.DB);
         return new Response(`Crawled ${site}`, { status: 200 });
       } catch (err: any) {
         return new Response(`Crawl failed: ${err?.message ?? err}`, { status: 500 });
@@ -158,14 +160,20 @@ export default {
     }
     if (url.pathname === "/ingest" && request.method === "POST") {
       try {
-        const body = (await request.json()) as { slug: string; posts: any[] };
+        const body = (await request.json()) as {
+          slug: string;
+          posts: any[];
+          error?: string;
+        };
         if (!body.slug || !Array.isArray(body.posts)) {
           return new Response("Invalid body. Expected { slug, posts: [...] }", { status: 400 });
         }
         const siteId = await getSiteId(env.DB, body.slug);
         await upsertPosts(env.DB, siteId, body.posts);
-        // Playwright 경유 사이트(펨코/루리웹/다모앙)도 /health에서 같이 보이도록 기록
-        await recordCrawlRun(env.DB, body.slug, body.posts.length);
+        // Playwright 경유 사이트(펨코/루리웹/다모앙)도 /health·/status에서 같이 보이도록
+        // 기록한다. 0건이어도 반드시 호출되므로(scripts/crawl_protected.ts 참고) 실패한
+        // 시도도 "시도 안 함"이 아니라 정확히 "실패"로 남는다.
+        await recordCrawlRun(env.DB, body.slug, body.posts.length, body.error);
         console.log(`[${body.slug}] ingested ${body.posts.length} posts`);
         return new Response(`Ingested ${body.posts.length} posts for ${body.slug}`, { status: 200 });
       } catch (err: any) {
