@@ -21,7 +21,10 @@ export async function fetchSlrclub(): Promise<RawPost[]> {
     const linkMatch = tr.match(/href=["'](\/bbs\/vx2\.php\?[^"']*no=(\d+)[^"']*)["']/i);
     if (!linkMatch) continue;
 
-    const rawUrl = linkMatch[1];
+    // HTML 속성값의 &amp;를 실제 &로 되돌리지 않으면 쿼리스트링이
+    // "?id=free&amp;no=123"이 되어 no 파라미터를 브라우저가 인식하지 못하고
+    // 글이 아닌 사이트 첫 화면으로 연결된다(2026-08-14 확인, 98/99건 깨져 있었음).
+    const rawUrl = linkMatch[1].replace(/&amp;/gi, "&");
     const sourcePostId = linkMatch[2];
 
     const titleMatch = tr.match(/<td[^>]*class=["']sbj["'][^>]*>([\s\S]*?)<\/td>/i);

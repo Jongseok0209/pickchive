@@ -1,5 +1,11 @@
 import type { Env } from "./types";
-import { getSiteId, upsertPosts, cleanupOldData } from "./db";
+import {
+  getSiteId,
+  upsertPosts,
+  cleanupOldData,
+  recordCrawlRun,
+  getCrawlHealth,
+} from "./db";
 import { fetchClien } from "./parsers/clien";
 import { fetchPpomppu } from "./parsers/ppomppu";
 import { fetchBobaedream } from "./parsers/bobaedream";
@@ -15,15 +21,47 @@ import { fetchFmkorea } from "./parsers/fmkorea";
 import { fetchDamoang } from "./parsers/damoang";
 import { fetchRuliweb } from "./parsers/ruliweb";
 
+// 여러 사이트가 간헐적으로 "조용히 실패"한다 — HTTP 200인데 목록이 비어 0건
+// 수집되는 케이스(mlbpark의 비결정적 응답, todayhumor 등에서 실제 관찰됨).
+// 파서마다 재시도를 따로 넣는 대신 이 공통 경로에서 한 번에 처리하고,
+// 결과를 crawl_runs에 남겨 /health로 조용한 실패를 바로 볼 수 있게 한다.
+const CRAWL_ATTEMPTS = 3;
+
 async function crawlSite(
   db: Env["DB"],
   slug: string,
   fetcher: () => Promise<Awaited<ReturnType<typeof fetchClien>>>
 ) {
   const siteId = await getSiteId(db, slug);
-  const posts = await fetcher();
-  await upsertPosts(db, siteId, posts as any);
-  console.log(`[${slug}] crawled ${posts.length} posts`);
+  let posts: Awaited<ReturnType<typeof fetchClien>> = [];
+  let lastError: string | undefined;
+
+  for (let attempt = 0; attempt < CRAWL_ATTEMPTS; attempt++) {
+    try {
+      posts = await fetcher();
+      lastError = undefined;
+      if (posts.length > 0) break;
+    } catch (err: any) {
+      lastError = err?.message ?? String(err);
+      posts = [];
+    }
+    if (attempt < CRAWL_ATTEMPTS - 1) {
+      await new Promise(resolve => setTimeout(resolve, 700 * (attempt + 1)));
+    }
+  }
+
+  if (posts.length > 0) {
+    await upsertPosts(db, siteId, posts as any);
+  }
+  await recordCrawlRun(db, slug, posts.length, lastError);
+  console.log(
+    `[${slug}] crawled ${posts.length} posts${lastError ? ` (error: ${lastError})` : ""}`
+  );
+
+  // 0건이면 워크플로가 성공으로 넘어가지 않도록 실패로 알린다.
+  if (posts.length === 0) {
+    throw new Error(`[${slug}] 0 posts${lastError ? `: ${lastError}` : ""}`);
+  }
 }
 
 export default {
@@ -58,8 +96,24 @@ export default {
           { status: 400 }
         );
       }
-      await fetchers[site]();
-      return new Response(`Crawled ${site}`, { status: 200 });
+      // 0건 수집이면 crawlSite가 throw한다. 지금까지는 이런 조용한 실패에도
+      // 200이 나가서 GitHub Actions가 "성공"으로 넘어가버렸다 — 500으로 알린다.
+      try {
+        await fetchers[site]();
+        return new Response(`Crawled ${site}`, { status: 200 });
+      } catch (err: any) {
+        return new Response(`Crawl failed: ${err?.message ?? err}`, { status: 500 });
+      }
+    }
+    if (url.pathname === "/health") {
+      const rows = await getCrawlHealth(env.DB);
+      const stale = (rows as any[]).filter(
+        r => r.mins_since_ok === null || r.mins_since_ok > 60
+      );
+      return Response.json(
+        { ok: stale.length === 0, staleSites: stale.map(r => r.slug), sites: rows },
+        { status: stale.length === 0 ? 200 : 503 }
+      );
     }
     if (url.pathname === "/ingest" && request.method === "POST") {
       try {
@@ -69,6 +123,8 @@ export default {
         }
         const siteId = await getSiteId(env.DB, body.slug);
         await upsertPosts(env.DB, siteId, body.posts);
+        // Playwright 경유 사이트(펨코/루리웹/다모앙)도 /health에서 같이 보이도록 기록
+        await recordCrawlRun(env.DB, body.slug, body.posts.length);
         console.log(`[${body.slug}] ingested ${body.posts.length} posts`);
         return new Response(`Ingested ${body.posts.length} posts for ${body.slug}`, { status: 200 });
       } catch (err: any) {

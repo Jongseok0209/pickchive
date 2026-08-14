@@ -12,6 +12,17 @@ export async function getSiteId(
   return row.id;
 }
 
+// HTML 속성값에서 뽑아낸 URL에는 &amp; 같은 엔티티가 그대로 남아있을 수 있다.
+// 그대로 저장하면 "?id=free&amp;no=123"처럼 되어 쿼리 파라미터가 깨지고
+// 글이 아닌 엉뚱한 페이지로 연결된다(slrclub에서 실제로 98/99건 발생).
+// 파서마다 놓치기 쉬운 실수라 저장 직전에 한 번 더 정규화한다.
+function normalizeUrl(url: string): string {
+  return url
+    .replace(/&amp;/gi, "&")
+    .replace(/&#0*38;/g, "&")
+    .replace(/&#x0*26;/gi, "&");
+}
+
 export async function upsertPosts(
   db: D1Database,
   siteId: number,
@@ -48,7 +59,7 @@ export async function upsertPosts(
         siteId,
         p.sourcePostId,
         p.title,
-        p.url,
+        normalizeUrl(p.url),
         p.author,
         p.viewCount,
         p.recommendCount,
@@ -88,6 +99,47 @@ export async function upsertPosts(
       await db.batch(snapshotBatch);
     }
   }
+}
+
+export async function recordCrawlRun(
+  db: D1Database,
+  slug: string,
+  postCount: number,
+  error?: string
+): Promise<void> {
+  try {
+    await db
+      .prepare(
+        `INSERT INTO crawl_runs (slug, post_count, ok, error) VALUES (?, ?, ?, ?)`
+      )
+      .bind(slug, postCount, postCount > 0 ? 1 : 0, error ?? null)
+      .run();
+  } catch {
+    // 기록 실패가 크롤 자체를 막지 않도록 삼킨다
+  }
+}
+
+/** 사이트별 최근 크롤 상태 요약 (/health 용) */
+export async function getCrawlHealth(db: D1Database): Promise<unknown[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT s.slug,
+              (SELECT CAST((julianday('now') - julianday(MAX(p.crawled_at))) * 1440 AS INT)
+                 FROM posts p WHERE p.site_id = s.id) AS mins_since_post_update,
+              (SELECT COUNT(*) FROM posts p WHERE p.site_id = s.id) AS posts,
+              (SELECT r.post_count FROM crawl_runs r WHERE r.slug = s.slug
+                ORDER BY r.ran_at DESC LIMIT 1) AS last_count,
+              (SELECT CAST((julianday('now') - julianday(MAX(r.ran_at))) * 1440 AS INT)
+                 FROM crawl_runs r WHERE r.slug = s.slug AND r.ok = 1) AS mins_since_ok,
+              (SELECT COUNT(*) FROM crawl_runs r
+                WHERE r.slug = s.slug AND r.ok = 0
+                  AND r.ran_at >= datetime('now', '-1 day')) AS fails_24h,
+              (SELECT r.error FROM crawl_runs r WHERE r.slug = s.slug AND r.error IS NOT NULL
+                ORDER BY r.ran_at DESC LIMIT 1) AS last_error
+       FROM sites s ORDER BY s.slug`
+    )
+    .all();
+  return results;
 }
 
 export async function cleanupOldData(db: Env["DB"]): Promise<{
