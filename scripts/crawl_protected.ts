@@ -26,48 +26,58 @@ async function crawlFmkorea(browser: any) {
   // 추천수/댓글수 클래스도 기존 셀렉터(.voted_count, .comment 등)와 실제 클래스
   // (pc_voted_count, comment_count)가 달라 전부 0으로 빠졌다.
   // listStyle=list(텍스트 형식)는 조회수/추천수/댓글수가 모두 별도 컬럼으로 나온다.
-  await page.goto("https://www.fmkorea.com/best?listStyle=list", {
-    waitUntil: "domcontentloaded",
-    timeout: 30000,
-  });
-  await page.waitForTimeout(2000);
-
-  const raw = await page.evaluate(() => {
-    const list: any[] = [];
-    const trs = document.querySelectorAll("table.bd_lst tbody tr");
-    trs.forEach(tr => {
-      const titleLink = tr.querySelector("a.hx");
-      if (!titleLink) return;
-      const href = titleLink.getAttribute("href") || "";
-      const match = href.match(/document_srl=(\d+)/);
-      if (!match) return;
-      const sourcePostId = match[1];
-      if (list.some(p => p.sourcePostId === sourcePostId)) return;
-
-      const title = titleLink.textContent?.trim() || "";
-      if (!title || title.length < 2) return;
-
-      const author = tr.querySelector("td.author")?.textContent?.trim() || null;
-      const commentText = tr.querySelector("a.replyNum")?.textContent?.trim() || "0";
-      const recoCell = tr.querySelector("td.m_no.m_no_voted");
-      const viewCell = Array.from(tr.querySelectorAll("td.m_no")).find(
-        td => !td.classList.contains("m_no_voted")
-      );
-      const timeText = tr.querySelector("td.time")?.textContent?.trim() || null;
-
-      list.push({
-        sourcePostId,
-        title,
-        href,
-        author,
-        viewText: viewCell?.textContent || null,
-        recoText: recoCell?.textContent || null,
-        commentText,
-        timeText,
+  // GitHub Actions 러너에서는 로컬보다 느리게 로드될 때가 있어서(2026-08-14 확인:
+  // 로컬 테스트로는 정상인데 CI 실행에서 "Playwright found 0 posts") 첫 시도가
+  // 비어있으면 더 기다렸다가 재시도한다.
+  let raw: any[] = [];
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt === 0) {
+      await page.goto("https://www.fmkorea.com/best?listStyle=list", {
+        waitUntil: "domcontentloaded",
+        timeout: 30000,
       });
+    }
+    await page.waitForTimeout(2000 + attempt * 2000);
+
+    raw = await page.evaluate(() => {
+      const list: any[] = [];
+      const trs = document.querySelectorAll("table.bd_lst tbody tr");
+      trs.forEach(tr => {
+        const titleLink = tr.querySelector("a.hx");
+        if (!titleLink) return;
+        const href = titleLink.getAttribute("href") || "";
+        const match = href.match(/document_srl=(\d+)/);
+        if (!match) return;
+        const sourcePostId = match[1];
+        if (list.some(p => p.sourcePostId === sourcePostId)) return;
+
+        const title = titleLink.textContent?.trim() || "";
+        if (!title || title.length < 2) return;
+
+        const author = tr.querySelector("td.author")?.textContent?.trim() || null;
+        const commentText = tr.querySelector("a.replyNum")?.textContent?.trim() || "0";
+        const recoCell = tr.querySelector("td.m_no.m_no_voted");
+        const viewCell = Array.from(tr.querySelectorAll("td.m_no")).find(
+          td => !td.classList.contains("m_no_voted")
+        );
+        const timeText = tr.querySelector("td.time")?.textContent?.trim() || null;
+
+        list.push({
+          sourcePostId,
+          title,
+          href,
+          author,
+          viewText: viewCell?.textContent || null,
+          recoText: recoCell?.textContent || null,
+          commentText,
+          timeText,
+        });
+      });
+      return list;
     });
-    return list;
-  });
+
+    if (raw.length > 0) break;
+  }
 
   const posts = raw.map((p: any) => ({
     sourcePostId: p.sourcePostId,
