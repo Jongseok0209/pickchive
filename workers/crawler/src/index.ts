@@ -64,9 +64,50 @@ async function crawlSite(
   }
 }
 
+// HTTP로 직접 수집 가능한 사이트(= Playwright 불필요). Cron이 이 목록을 돈다.
+const HTTP_CRAWL_SITES = [
+  "clien",
+  "ppomppu",
+  "bobaedream",
+  "cook82",
+  "inven",
+  "todayhumor",
+  "ddanzi",
+  "humoruniv",
+  "etoland",
+  "mlbpark",
+  "slrclub",
+  "damoang",
+];
+
+const WORKER_ORIGIN = "https://pickchive-crawler.won0209.workers.dev";
+
 export default {
+  // GitHub Actions의 schedule(*/5)은 실제로는 평균 1시간 간격으로만 실행된다
+  // (2026-08-14 실측: 03:30 → 05:17 → 06:48 → 08:04 …). GitHub이 스케줄
+  // 이벤트를 부하 상황에 따라 지연·병합하기 때문으로, 우리가 고칠 수 없다.
+  // 그래서 Cloudflare Cron Trigger를 주 스케줄러로 되살린다.
+  // (과거 커밋 a8ac805에서 "한 번도 발화하지 않는다"는 이유로 제거했었으나,
+  //  이제 crawl_runs/health로 발화 여부를 객관적으로 검증할 수 있어 재도입.
+  //  GitHub Actions는 백업 경로로 그대로 둔다.)
+  //
+  // 사이트별로 자기 자신에게 subrequest를 보내는 이유: 한 invocation에서
+  // 12개 사이트 HTML을 모두 파싱하면 CPU 한도에 걸릴 수 있는데,
+  // 요청을 나누면 각 사이트가 독립된 실행 예산을 갖는다.
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     console.log(`Scheduled event triggered: ${event.cron}`);
+    ctx.waitUntil(
+      (async () => {
+        for (const slug of HTTP_CRAWL_SITES) {
+          try {
+            const res = await fetch(`${WORKER_ORIGIN}/crawl?site=${slug}`);
+            console.log(`[cron] ${slug} -> ${res.status}`);
+          } catch (err: any) {
+            console.log(`[cron] ${slug} -> error ${err?.message ?? err}`);
+          }
+        }
+      })()
+    );
   },
 
   // 로컬 테스트/수동 트리거용: /crawl?site=clien 로 개별 사이트 크롤링 실행

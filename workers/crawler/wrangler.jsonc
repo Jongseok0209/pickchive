@@ -4,6 +4,11 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-08-13",
   "compatibility_flags": ["nodejs_compat"],
+  // GitHub Actions의 schedule은 5분 요청에도 실제로는 ~1시간 간격으로만
+  // 실행돼서(실측) Cloudflare Cron을 주 스케줄러로 사용한다. 상세는 src/index.ts 주석 참고.
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
   "d1_databases": [
     {
       "binding": "DB",
