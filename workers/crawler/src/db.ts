@@ -95,12 +95,16 @@ export async function cleanupOldData(db: Env["DB"]): Promise<{
   snapshotsDeleted: number;
 }> {
   // 목록에서 밀려나 더 이상 재수집되지 않는(=crawled_at이 갱신을 멈춘) 글은
-  // 24시간 지나면 지운다. 처음 본 지 30일 지난 글도 별도로 지운다(둘 중 하나만
+  // 지운다. 단, 홈 화면 시간필터에 "주간"(TIME_WINDOWS의 week, 7일)이 있어서
+  // 그보다 짧게 잡으면(예: 24시간) 대부분의 글이 하루 안에 지워져 주간 필터가
+  // 사실상 텅 비어버린다(대부분 사이트 목록에서 몇 시간 안에 밀려나므로).
+  // 그래서 가장 긴 필터 창(7일)과 맞춰서, 어떤 필터로도 더는 보일 수 없는
+  // 시점에만 지운다. 처음 본 지 30일 지난 글도 별도로 지운다(둘 중 하나만
   // 걸려도 삭제).
   const postsResult = await db
     .prepare(
       `DELETE FROM posts WHERE first_seen_at < datetime('now', '-30 days')
-        OR crawled_at < datetime('now', '-24 hours')`
+        OR crawled_at < datetime('now', '-7 days')`
     )
     .run();
   const snapshotsResult = await db
