@@ -129,26 +129,26 @@ const username = await Astro.session?.get("username");
             </li>
           )
         }
-        <li class="text-sm">
+        <li class="flex items-center justify-center gap-2 text-sm">
           {
             username ? (
-              <span class="flex items-center justify-center gap-2">
+              <>
                 <span class="text-foreground/70">{username}님</span>
                 <form method="POST" action="/api/auth/logout">
                   <button type="submit" class="hover:text-accent underline">
                     로그아웃
                   </button>
                 </form>
-              </span>
+              </>
             ) : (
-              <span class="flex items-center justify-center gap-2">
+              <>
                 <a href="/login" class="hover:text-accent">
                   로그인
                 </a>
                 <a href="/signup" class="hover:text-accent">
                   회원가입
                 </a>
-              </span>
+              </>
             )
           }
         </li>
