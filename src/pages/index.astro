@@ -411,7 +411,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     // 그 안에서만 제목 검색을 한다(별도 검색 모드가 아니라 같은 필터의 연장선).
     function currentFilterParams(offset: number): URLSearchParams {
       const params = new URLSearchParams({
-        window: main!.dataset.window ?? "24h",
+        window: main!.dataset.window ?? "3h",
         sort: main!.dataset.sort ?? "score",
         offset: String(offset),
       });
@@ -627,12 +627,12 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     ): string {
       const params = new URLSearchParams();
       const state = {
-        window: main!.dataset.window || "24h",
+        window: main!.dataset.window || "3h",
         sort: main!.dataset.sort || "score",
         site: main!.dataset.site || "",
         ...overrides,
       };
-      if (state.window && state.window !== "24h")
+      if (state.window && state.window !== "3h")
         params.set("window", state.window);
       if (state.sort && state.sort !== "score") params.set("sort", state.sort);
       if (state.site) params.set("site", state.site);
@@ -701,7 +701,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     wireFilterNav(
       "기간 필터",
       "window",
-      "24h",
+      "3h",
       ["bg-accent", "text-accent-foreground"],
       ["bg-muted", "hover:text-accent"]
     );

@@ -27,7 +27,7 @@ export const TIME_WINDOWS = [
 
 export type WindowKey = (typeof TIME_WINDOWS)[number]["key"];
 
-export const DEFAULT_WINDOW: WindowKey = "24h";
+export const DEFAULT_WINDOW: WindowKey = "3h";
 
 function hoursForWindow(key: string): number {
   return (

@@ -9,7 +9,7 @@ export const GET: APIRoute = async ({ url }) => {
   const offset = Number(url.searchParams.get("offset") ?? "0") || 0;
 
   const posts = await getRankedPosts({
-    window: url.searchParams.get("window") ?? "24h",
+    window: url.searchParams.get("window") ?? "3h",
     sort: (url.searchParams.get("sort") ?? "score") as SortKey,
     site: url.searchParams.get("site") ?? undefined,
     titleQuery: url.searchParams.get("q") ?? undefined,
