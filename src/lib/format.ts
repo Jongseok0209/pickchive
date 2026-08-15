@@ -32,6 +32,17 @@ export function formatElapsedLabel(
   return `${label} ${diffDay}일 전`;
 }
 
+// 일부 사이트는 제목 끝에 이미 "(N)" 형태로 댓글수를 붙여 보여준다(예: "... (10)").
+// 이 경우 "[원본 댓글 N]" 배지까지 또 붙이면 같은 숫자가 중복 노출된다.
+export function titleHasCommentCountSuffix(
+  title: string,
+  commentCount: number | null
+): boolean {
+  if (!commentCount) return false;
+  const match = title.match(/\((\d+)\)\s*$/);
+  return !!match && Number(match[1]) === commentCount;
+}
+
 // HTML 엔티티 디코딩
 export function decodeEntities(text: string | null): string {
   if (!text) return "";

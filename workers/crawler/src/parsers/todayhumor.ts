@@ -136,8 +136,50 @@ async function fetchTodayhumorList(listUrl: string): Promise<RawPost[]> {
   );
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+const RETRY_ATTEMPTS = 8;
+
+// 게시판 하나씩 완전히 독립적으로 재시도한다. 예전엔 crawlSite의 공용 재시도
+// 루프가 fetchTodayhumor() 전체(두 게시판 다)를 한 단위로 재시도해서, humorbest만
+// 일시적으로 비어도 이미 받아온 bestofbest 결과까지 같이 버리고 두 게시판을
+// 처음부터 다시 찔렀다. 게시판별로 자기 재시도를 따로 돌려서, 한쪽이 계속
+// 실패해도 다른 쪽 재시도 횟수·결과에 전혀 영향을 주지 않게 한다.
+async function fetchTodayhumorListWithRetry(listUrl: string): Promise<RawPost[]> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < RETRY_ATTEMPTS; attempt++) {
+    try {
+      const rows = await fetchTodayhumorList(listUrl);
+      if (rows.length > 0) return rows;
+      lastError = undefined;
+    } catch (err) {
+      lastError = err;
+    }
+    if (attempt < RETRY_ATTEMPTS - 1) {
+      await sleep(700 * (attempt + 1));
+    }
+  }
+  if (lastError) {
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  }
+  return [];
+}
+
 export async function fetchTodayhumor(): Promise<RawPost[]> {
-  const lists = await Promise.all(LIST_URLS.map(fetchTodayhumorList));
+  const settled = await Promise.allSettled(
+    LIST_URLS.map(fetchTodayhumorListWithRetry)
+  );
+
+  // 한쪽 게시판이 재시도를 전부 소진하고 끝내 실패(reject)하거나 빈 배열로
+  // 끝나도, 다른 쪽이 얻어온 결과는 그대로 살려서 합친다 — 하나의 실패
+  // 때문에 이미 성공한 나머지 결과까지 통째로 지우지 않는다.
+  const lists = settled
+    .filter(
+      (r): r is PromiseFulfilledResult<RawPost[]> => r.status === "fulfilled"
+    )
+    .map(r => r.value);
 
   // bestofbest와 humorbest에 같은 글이 겹쳐서 뜨는 경우가 있어 sourcePostId로 합친다.
   const bySourcePostId = new Map<string, RawPost>();
@@ -148,5 +190,17 @@ export async function fetchTodayhumor(): Promise<RawPost[]> {
       }
     }
   }
-  return [...bySourcePostId.values()];
+  const merged = [...bySourcePostId.values()];
+
+  // 둘 다 완전히 실패(빈 배열 포함)했을 때만 상위(crawlSite)에 에러로 알린다.
+  if (merged.length === 0) {
+    const firstError = settled.find(
+      (r): r is PromiseRejectedResult => r.status === "rejected"
+    )?.reason;
+    if (firstError) {
+      throw firstError instanceof Error ? firstError : new Error(String(firstError));
+    }
+  }
+
+  return merged;
 }

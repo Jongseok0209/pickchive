@@ -89,10 +89,10 @@ const CRAWL_FETCHERS: Record<string, (db: Env["DB"]) => Promise<void>> = {
   cook82: db => crawlSite(db, "cook82", fetchCook82),
   inven: db => crawlSite(db, "inven", fetchInven),
   // 오늘의유머는 차단이 아니라 같은 요청도 서버가 비결정적으로 빈 목록/정상
-  // 목록을 섞어서 준다(2026-08-14 확인 — 14시간 연속 0건이다가 수동으로 두 번
-  // 찔러보니 그중 한 번은 정상 30건). 기본 3회로는 실패율이 너무 높아서
-  // todayhumor만 재시도를 6회로 늘림.
-  todayhumor: db => crawlSite(db, "todayhumor", fetchTodayhumor, 6),
+  // 목록을 섞어서 준다(2026-08-14 확인). fetchTodayhumor 안에서 bestofbest/
+  // humorbest 게시판마다 독립적으로 재시도(각 8회)하도록 옮겼으니, 여기 바깥
+  // crawlSite 재시도는 곱연산으로 시간만 늘리는 셈이라 1회(재시도 없음)로 둔다.
+  todayhumor: db => crawlSite(db, "todayhumor", fetchTodayhumor, 1),
   ddanzi: db => crawlSite(db, "ddanzi", fetchDdanzi),
   humoruniv: db => crawlSite(db, "humoruniv", fetchHumoruniv),
   etoland: db => crawlSite(db, "etoland", fetchEtoland),

@@ -10,20 +10,47 @@ import {
   DEFAULT_WINDOW,
   type SortKey,
 } from "@/lib/posts";
+import { getUserFilterPrefs, saveUserFilterPrefs } from "@/lib/userPrefs";
 
 export const prerender = false;
 
 const PAGE_SIZE = 20;
 
-const windowParam = Astro.url.searchParams.get("window") ?? DEFAULT_WINDOW;
-const sortParam = (Astro.url.searchParams.get("sort") ?? "score") as SortKey;
-const siteParam = Astro.url.searchParams.get("site") ?? "";
+const hasFilterParams =
+  Astro.url.searchParams.has("window") ||
+  Astro.url.searchParams.has("sort") ||
+  Astro.url.searchParams.has("site");
+const userId = await Astro.session?.get("userId");
+
+// 로그인한 회원이 필터 없이 맨 홈으로 들어오면, 하드코딩된 기본값 대신 마지막으로
+// 쓴 필터를 기본으로 깔아준다. 반대로 필터가 붙은(공유 링크 등 포함) 요청이면
+// 하드코딩 값이 아니라 그 필터를 저장해서 다음 방문에 이어지게 한다.
+const savedPrefs =
+  !hasFilterParams && userId ? await getUserFilterPrefs(userId) : null;
+
+const windowParam =
+  Astro.url.searchParams.get("window") ?? savedPrefs?.window ?? DEFAULT_WINDOW;
+const sortParam = (Astro.url.searchParams.get("sort") ??
+  savedPrefs?.sort ??
+  "score") as SortKey;
+// 사이트 필터는 다중 선택 지원 — 콤마로 이어붙인 slug 목록, 비어있으면 전체.
+const siteParam =
+  Astro.url.searchParams.get("site") ?? savedPrefs?.site ?? "";
+const selectedSites = siteParam.split(",").filter(Boolean);
+
+if (hasFilterParams && userId) {
+  await saveUserFilterPrefs(userId, {
+    window: windowParam,
+    sort: sortParam,
+    site: siteParam,
+  });
+}
 
 const [posts, sites] = await Promise.all([
   getRankedPosts({
     window: windowParam,
     sort: sortParam,
-    site: siteParam || undefined,
+    site: selectedSites.length ? selectedSites : undefined,
     limit: PAGE_SIZE,
     offset: 0,
   }),
@@ -120,22 +147,41 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
             전체
           </a>
           {
-            sites.map(s => (
-              <a
-                href={buildUrl({ site: s.slug })}
-                data-site-value={s.slug}
-                class:list={[
-                  "rounded px-2.5 py-1 text-xs font-medium",
-                  siteParam === s.slug
-                    ? "border-accent text-accent border"
-                    : "border-border text-foreground/60 hover:text-accent border",
-                ]}
-              >
-                {s.name}
-              </a>
-            ))
+            sites.map(s => {
+              const isActive = selectedSites.includes(s.slug);
+              const toggled = isActive
+                ? selectedSites.filter(x => x !== s.slug)
+                : [...selectedSites, s.slug];
+              return (
+                <a
+                  href={buildUrl({
+                    site: toggled.length ? toggled.join(",") : null,
+                  })}
+                  data-site-value={s.slug}
+                  class:list={[
+                    "rounded px-2.5 py-1 text-xs font-medium",
+                    isActive
+                      ? "border-accent text-accent border"
+                      : "border-border text-foreground/60 hover:text-accent border",
+                  ]}
+                >
+                  {s.name}
+                </a>
+              );
+            })
           }
         </nav>
+
+        {
+          !userId && (
+            <p class="text-foreground/50 mt-2 text-xs">
+              <a href="/login" class="text-accent hover:underline">
+                로그인
+              </a>
+              하면 마지막에 쓴 필터를 다음에도 그대로 기억해요.
+            </p>
+          )
+        }
       </div>
 
       <div class="mt-3">
@@ -229,6 +275,17 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
       .replace(/'/g, "&#39;");
   }
 
+  // 일부 사이트는 제목 끝에 이미 "(N)" 형태로 댓글수를 붙여 보여준다(예: "... (10)").
+  // 이 경우 배지도 같은 "(N)" 형태라 또 붙이면 숫자가 그대로 중복 노출된다.
+  function titleHasCommentCountSuffix(
+    title: string,
+    commentCount: number | null
+  ): boolean {
+    if (!commentCount) return false;
+    const match = title.match(/\((\d+)\)\s*$/);
+    return !!match && Number(match[1]) === commentCount;
+  }
+
   // 클릭해서 읽은 글은 제목을 흐리게 표시한다. 로그인/DB 없이 이 브라우저에서만
   // 기억하면 되는 정보라 localStorage로 충분하다. 오래된 항목은 잘라내서
   // 무한정 커지지 않게 한다.
@@ -307,9 +364,11 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
       `<a href="/p/${post.id}#comments" data-astro-reload class="text-accent hover:underline">댓글 보기</a>`
     );
 
-    const commentBadge = post.commentCount
-      ? `<span class="text-foreground/50 ms-1 text-sm" title="크롤링 시점 기준 원본 댓글 수 (실시간 아님)">[원본 댓글 ${post.commentCount}]</span>`
-      : "";
+    const commentBadge =
+      post.commentCount &&
+      !titleHasCommentCountSuffix(decodeEntities(post.title), post.commentCount)
+        ? `<span class="text-foreground/50 ms-1 text-sm" title="크롤링 시점 기준 원본 댓글 수 (실시간 아님)">(${post.commentCount})</span>`
+        : "";
 
     return `<li class="border-border border-b py-3" data-post-id="${post.id}">
       <div class="flex items-start gap-2">
@@ -651,10 +710,17 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
         .forEach(a => {
           a.href = buildClientUrl({ sort: a.dataset.sortValue });
         });
+      const currentSites = (main!.dataset.site || "").split(",").filter(Boolean);
       document
         .querySelectorAll<HTMLAnchorElement>("a[data-site-value]")
         .forEach(a => {
-          a.href = buildClientUrl({ site: a.dataset.siteValue || undefined });
+          const value = a.dataset.siteValue || "";
+          const toggled = currentSites.includes(value)
+            ? currentSites.filter(s => s !== value)
+            : [...currentSites, value];
+          a.href = buildClientUrl({
+            site: toggled.length ? toggled.join(",") : undefined,
+          });
         });
     }
 
@@ -712,13 +778,55 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
       ["border-accent", "text-accent", "border"],
       ["border-border", "text-foreground/60", "hover:text-accent", "border"]
     );
-    wireFilterNav(
-      "사이트 필터",
-      "site",
-      "",
-      ["border-accent", "text-accent", "border"],
-      ["border-border", "text-foreground/60", "hover:text-accent", "border"]
-    );
+
+    // 사이트 필터는 다중 선택이라(전체 -> 1개 -> 여러 개, 마지막 하나를 다시
+    // 취소하면 전체로 복귀) window/sort처럼 "누른 값으로 그냥 교체"하는
+    // wireFilterNav를 재사용할 수 없다 — 클릭된 site를 현재 선택 집합에
+    // 토글해 넣는 별도 핸들러가 필요하다.
+    function wireSiteFilterNav() {
+      const activeClasses = ["border-accent", "text-accent", "border"];
+      const inactiveClasses = [
+        "border-border",
+        "text-foreground/60",
+        "hover:text-accent",
+        "border",
+      ];
+      const nav = document.querySelector<HTMLElement>(
+        'nav[aria-label="사이트 필터"]'
+      );
+      if (!nav) return;
+      nav.addEventListener(
+        "click",
+        e => {
+          const link = (e.target as HTMLElement).closest("a");
+          if (!link || !nav.contains(link)) return;
+          if (!searchModeActive) return; // 검색 중이 아니면 원래대로 페이지 이동
+
+          e.preventDefault();
+          const clicked = link.dataset.siteValue ?? "";
+          const current = (main!.dataset.site || "").split(",").filter(Boolean);
+          const next = !clicked
+            ? [] // "전체"는 선택을 전부 비운다
+            : current.includes(clicked)
+              ? current.filter(s => s !== clicked)
+              : [...current, clicked];
+          main!.dataset.site = next.join(",");
+          refreshFilterHrefs();
+          history.replaceState(history.state, "", buildClientUrl({}));
+
+          nav.querySelectorAll<HTMLAnchorElement>("a[data-site-value]").forEach(a => {
+            const value = a.dataset.siteValue ?? "";
+            const isActive = value === "" ? next.length === 0 : next.includes(value);
+            a.classList.remove(...activeClasses, ...inactiveClasses);
+            a.classList.add(...(isActive ? activeClasses : inactiveClasses));
+          });
+
+          void runSearch(searchQuery);
+        },
+        { signal }
+      );
+    }
+    wireSiteFilterNav();
   }
 
   // astro:page-load는 최초 로드 시에도 발생한다(Astro 공식 동작). 아래처럼

@@ -1,5 +1,10 @@
 ---
-import { formatCount, formatElapsedLabel, decodeEntities } from "@/lib/format";
+import {
+  formatCount,
+  formatElapsedLabel,
+  decodeEntities,
+  titleHasCommentCountSuffix,
+} from "@/lib/format";
 import { type PostWithSite } from "@/lib/posts";
 
 interface Props {
@@ -11,6 +16,10 @@ const { post } = Astro.props;
 // 마지막으로 갱신한 crawled_at 기준 — 둘을 같이 보여줘야 필터 결과랑 화면이 안 헷갈린다.
 const postedAgeLabel = formatElapsedLabel(post.firstSeenAt, "게시");
 const updatedAgeLabel = formatElapsedLabel(post.crawledAt, "업데이트");
+const decodedTitle = decodeEntities(post.title);
+const showCommentBadge =
+  !!post.commentCount &&
+  !titleHasCommentCountSuffix(decodedTitle, post.commentCount);
 ---
 
 <li class="border-border border-b py-3" data-post-id={post.id}>
@@ -28,15 +37,15 @@ const updatedAgeLabel = formatElapsedLabel(post.crawledAt, "업데이트");
         data-post-title-link
         class="hover:text-accent font-medium break-words"
       >
-        {decodeEntities(post.title)}
+        {decodedTitle}
       </a>
       {
-        !!post.commentCount && (
+        showCommentBadge && (
           <span
             class="text-foreground/50 ms-1 text-sm"
             title="크롤링 시점 기준 원본 댓글 수 (실시간 아님)"
           >
-            [원본 댓글 {post.commentCount}]
+            ({post.commentCount})
           </span>
         )
       }

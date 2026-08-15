@@ -55,7 +55,8 @@ function orderByClause(sort: SortKey): string {
 export async function getRankedPosts(options: {
   window: string;
   sort?: SortKey;
-  site?: string;
+  // 복수 사이트 선택(다중 선택 필터) 지원. 비어있거나 undefined면 전체.
+  site?: string[];
   // 제목 검색어. 넘기면 현재 기간/사이트/정렬 필터가 적용된 목록 "안에서" 제목에
   // 이 글자가 포함된 글만 추린다 (별도 검색 모드가 아니라 같은 필터의 연장선).
   titleQuery?: string;
@@ -64,7 +65,10 @@ export async function getRankedPosts(options: {
 }): Promise<PostWithSite[]> {
   const hours = hoursForWindow(options.window);
   const sort = options.sort ?? "score";
-  const siteFilter = options.site ? "AND s.slug = ?" : "";
+  const sites = options.site?.filter(Boolean) ?? [];
+  const siteFilter = sites.length
+    ? `AND s.slug IN (${sites.map(() => "?").join(",")})`
+    : "";
   const titleQuery = options.titleQuery?.trim();
   const titleFilter = titleQuery ? "AND p.title LIKE ? ESCAPE '\\'" : "";
 
@@ -85,7 +89,7 @@ export async function getRankedPosts(options: {
   `;
 
   const binds: unknown[] = [`-${hours} hours`];
-  if (options.site) binds.push(options.site);
+  if (sites.length) binds.push(...sites);
   if (titleQuery) {
     // % _ \ 는 LIKE 와일드카드로 해석되니 검색어에 그대로 들어있으면 이스케이프한다.
     binds.push(`%${titleQuery.replace(/[\\%_]/g, ch => `\\${ch}`)}%`);
