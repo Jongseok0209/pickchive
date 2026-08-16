@@ -59,7 +59,7 @@ jobs:
           npm install playwright tsx
           npx playwright install chromium --with-deps
 
-      - name: Crawl protected sites (fmkorea, ruliweb, damoang) via Playwright
+      - name: Crawl protected sites (ruliweb, damoang) via Playwright
         continue-on-error: true
         run: npx tsx scripts/crawl_protected.ts
 

@@ -9,6 +9,13 @@ const LIST_URLS = [
 ];
 const BASE_URL = "https://www.todayhumor.co.kr";
 
+// 실행 콜로(Cloudflare 데이터센터)를 실패 원인에 같이 남기기 위해 마지막 응답의
+// cf-ray를 여기에 보관한다. "내가 수동으로 부르면 되는데 크론은 실패한다"는
+// 관찰의 유력한 가설이 "수동 호출은 한국/홍콩 엣지에서 실행되고, 크론은 임의의
+// (해외) 콜로에서 실행돼서 오늘의유머 쪽 응답이 달라진다"는 것이라, 실제로
+// 콜로와 성공/실패가 상관있는지 데이터로 확인하려는 목적(2026-08-16).
+export let lastColo: string | null = null;
+
 async function fetchTodayhumorList(listUrl: string): Promise<RawPost[]> {
   const res = await fetch(listUrl, {
     headers: {
@@ -22,6 +29,12 @@ async function fetchTodayhumorList(listUrl: string): Promise<RawPost[]> {
       "Sec-Fetch-Site": "same-origin",
     },
   });
+
+  // cf-ray 뒤쪽이 콜로 코드(예: "...-ICN" = 서울, "...-LAX" = 로스앤젤레스).
+  // HTTP 상태와 본문 길이도 같이 남겨야 "빈 목록을 받은 건지, 아예 다른 응답을
+  // 받은 건지" 구분할 수 있다.
+  const ray = res.headers.get("cf-ray");
+  lastColo = `${ray ? ray.split("-").pop() : "?"} status=${res.status}`;
 
   const rows: Partial<RawPost>[] = [];
   let currentTargetKey: "author" | "views" | "recom" | "date" | null = null;
@@ -144,12 +157,14 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// scheduled()가 사이트별로 15초 타임아웃(Promise.race)을 따로 걸어주고 있어서,
-// 여기서 재시도를 늘려도 크론 배치가 다시 CPU 제한에 걸리진 않는다 — 타임아웃이
-// 걸리면 이 사이트만 이번 턴에 실패로 끝날 뿐 다른 사이트에 영향이 없다(2026-08-16
-// 확인: 5회로 낮춘 건 불필요한 과잉대응이었음). GitHub Actions/수동 호출 쪽은 사이트당
-// 개별 요청이라 더더욱 시간 여유가 있다. 10회(최대 백오프 합 ~31.5초)로 올린다.
-const RETRY_ATTEMPTS = 10;
+// 오늘의유머 실패는 "요청마다 랜덤"이 아니라 몇 분 단위로 되는 창/안 되는 창이
+// 번갈아 오는 형태다(2026-08-16 실측: 21:11에 수동 15회 연속 전부 성공,
+// 21:12~21:15 자동 3회 전부 실패, 21:30에 수동 6회 전부 첫 시도에 성공).
+// 그래서 수십 초 안에 재시도를 몰아 넣는 건 같은 "안 되는 창"을 계속 두드리는
+// 셈이라 효과가 거의 없다. 게다가 백오프 합이 커지면 scheduled()의 사이트당
+// 15초 타임아웃에 잘려서 오히려 실패로 기록된다. 재시도는 짧게만 두고(순간적인
+// 흔들림만 흡수), 창이 바뀌길 기다리는 건 크론 로테이션 주기에 맡긴다.
+const RETRY_ATTEMPTS = 3;
 
 // 게시판 하나씩 완전히 독립적으로 재시도한다. 예전엔 crawlSite의 공용 재시도
 // 루프가 fetchTodayhumor() 전체(두 게시판 다)를 한 단위로 재시도해서, humorbest만
@@ -202,13 +217,17 @@ export async function fetchTodayhumor(): Promise<RawPost[]> {
   const merged = [...bySourcePostId.values()];
 
   // 둘 다 완전히 실패(빈 배열 포함)했을 때만 상위(crawlSite)에 에러로 알린다.
+  // 실패 시엔 실행 콜로/상태코드를 메시지에 실어서 crawl_runs에 남긴다 —
+  // /status의 시간순 로그에서 "어느 콜로에서 돌 때 실패하는지"가 바로 보이게.
   if (merged.length === 0) {
     const firstError = settled.find(
       (r): r is PromiseRejectedResult => r.status === "rejected"
     )?.reason;
     if (firstError) {
-      throw firstError instanceof Error ? firstError : new Error(String(firstError));
+      const msg = firstError instanceof Error ? firstError.message : String(firstError);
+      throw new Error(`${msg} [colo=${lastColo ?? "?"}]`);
     }
+    throw new Error(`0 posts (empty list) [colo=${lastColo ?? "?"}]`);
   }
 
   return merged;

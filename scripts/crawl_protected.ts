@@ -249,7 +249,13 @@ async function ingest(data: { slug: string; posts: unknown[]; error?: string }) 
 async function run() {
   const browser = await chromium.launch({ headless: true });
   try {
-    await ingest(await crawlFmkorea(browser));
+    // 펨코는 여기서 수집하지 않는다. GitHub Actions 러너는 데이터센터 IP라
+    // 펨코가 "에펨코리아 보안 시스템" 페이지로 100% 차단하기 때문에(2026-08-16
+    // 실측: 24시간 동안 이 경로 50회 시도 전부 실패, 성공 0회) 절대 성공할 수
+    // 없는 호출이었다. 게다가 이 실패가 맥미니(홈 IP) 수집 성공 기록과 뒤섞여
+    // crawl_runs에 남으면서, 펨코가 "됐다 안 됐다" 하는 것처럼 보이게 만들어
+    // 원인 파악을 방해했다. 펨코는 맥미니 launchd 경로(scripts/crawl_fmkorea_home.mjs)
+    // 하나로만 수집한다.
     await ingest(await crawlRuliweb(browser));
     await ingest(await crawlDamoang(browser));
   } catch (err: any) {

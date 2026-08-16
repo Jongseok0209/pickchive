@@ -71,17 +71,27 @@ async function crawlSite(
 }
 
 // HTTP로 직접 수집 가능한 사이트(= Playwright 불필요). Cron이 이 목록을 돈다.
+//
+// 오늘의유머는 몇 분 단위로 되는 창/안 되는 창이 번갈아 오는 사이트라(자세한
+// 내용은 parsers/todayhumor.ts 주석) 한 번 걸린 창을 짧은 재시도로 뚫는 건
+// 불가능하고, 대신 "다른 시각에 다시 시도"하는 횟수를 늘리는 게 유일하게
+// 효과가 있다. 그래서 로테이션 목록에 여러 번 넣어 다른 사이트보다 자주
+// 순번이 돌아오게 한다(2026-08-16).
 const HTTP_CRAWL_SITES = [
   "clien",
+  "todayhumor",
   "ppomppu",
   "bobaedream",
+  "todayhumor",
   "cook82",
   "inven",
   "todayhumor",
   "ddanzi",
   "humoruniv",
+  "todayhumor",
   "etoland",
   "mlbpark",
+  "todayhumor",
   "slrclub",
   "damoang",
 ];
