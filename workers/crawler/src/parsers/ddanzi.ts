@@ -17,7 +17,7 @@ function decodeEntities(text: string): string {
   return decoded;
 }
 
-import { parseIntSafe, type RawPost } from "../types";
+import { parseIntSafe, fetchTracked, type RawPost } from "../types";
 
 // /free는 자유게시판 최신글이라 조회수/추천수 낮은 글이 그대로 섞여 들어온다.
 // /best_all은 같은 게시판(자유게시판)의 BEST 필터 목록으로, 글 URL 패턴(/free/N)과
@@ -26,7 +26,7 @@ const LIST_URL = "https://www.ddanzi.com/best_all";
 const BASE_URL = "https://www.ddanzi.com";
 
 export async function fetchDdanzi(): Promise<RawPost[]> {
-  const res = await fetch(LIST_URL, {
+  const res = await fetchTracked(LIST_URL, {
     headers: {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",

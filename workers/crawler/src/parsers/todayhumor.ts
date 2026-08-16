@@ -1,4 +1,4 @@
-import { parseIntSafe, type RawPost } from "../types";
+import { parseIntSafe, fetchTracked, type RawPost } from "../types";
 
 // bestofbest(베스트 오브 베스트)만 보다가, humorbest(유머 베스트)도 같이
 // 시도해달라는 요청으로 두 게시판을 합쳐서 가져온다. 둘 다 같은 HTML
@@ -9,15 +9,8 @@ const LIST_URLS = [
 ];
 const BASE_URL = "https://www.todayhumor.co.kr";
 
-// 실행 콜로(Cloudflare 데이터센터)를 실패 원인에 같이 남기기 위해 마지막 응답의
-// cf-ray를 여기에 보관한다. "내가 수동으로 부르면 되는데 크론은 실패한다"는
-// 관찰의 유력한 가설이 "수동 호출은 한국/홍콩 엣지에서 실행되고, 크론은 임의의
-// (해외) 콜로에서 실행돼서 오늘의유머 쪽 응답이 달라진다"는 것이라, 실제로
-// 콜로와 성공/실패가 상관있는지 데이터로 확인하려는 목적(2026-08-16).
-export let lastColo: string | null = null;
-
 async function fetchTodayhumorList(listUrl: string): Promise<RawPost[]> {
-  const res = await fetch(listUrl, {
+  const res = await fetchTracked(listUrl, {
     headers: {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -29,12 +22,6 @@ async function fetchTodayhumorList(listUrl: string): Promise<RawPost[]> {
       "Sec-Fetch-Site": "same-origin",
     },
   });
-
-  // cf-ray 뒤쪽이 콜로 코드(예: "...-ICN" = 서울, "...-LAX" = 로스앤젤레스).
-  // HTTP 상태와 본문 길이도 같이 남겨야 "빈 목록을 받은 건지, 아예 다른 응답을
-  // 받은 건지" 구분할 수 있다.
-  const ray = res.headers.get("cf-ray");
-  lastColo = `${ray ? ray.split("-").pop() : "?"} status=${res.status}`;
 
   const rows: Partial<RawPost>[] = [];
   let currentTargetKey: "author" | "views" | "recom" | "date" | null = null;
@@ -216,18 +203,15 @@ export async function fetchTodayhumor(): Promise<RawPost[]> {
   }
   const merged = [...bySourcePostId.values()];
 
-  // 둘 다 완전히 실패(빈 배열 포함)했을 때만 상위(crawlSite)에 에러로 알린다.
-  // 실패 시엔 실행 콜로/상태코드를 메시지에 실어서 crawl_runs에 남긴다 —
-  // /status의 시간순 로그에서 "어느 콜로에서 돌 때 실패하는지"가 바로 보이게.
+  // 둘 다 완전히 실패했을 때만 상위(crawlSite)에 에러로 알린다. 상태코드/콜로는
+  // crawlSite가 공통으로 붙여주므로(types.ts의 describeLastFetch) 여기선 안 붙인다.
   if (merged.length === 0) {
     const firstError = settled.find(
       (r): r is PromiseRejectedResult => r.status === "rejected"
     )?.reason;
     if (firstError) {
-      const msg = firstError instanceof Error ? firstError.message : String(firstError);
-      throw new Error(`${msg} [colo=${lastColo ?? "?"}]`);
+      throw firstError instanceof Error ? firstError : new Error(String(firstError));
     }
-    throw new Error(`0 posts (empty list) [colo=${lastColo ?? "?"}]`);
   }
 
   return merged;

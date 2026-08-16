@@ -8,14 +8,14 @@ function decodeEntities(text: string): string {
     .replace(/&#39;/g, "'");
 }
 
-import { parseIntSafe, type RawPost } from "../types";
+import { parseIntSafe, fetchTracked, type RawPost } from "../types";
 
 // 구 URL(bbs/rss.php?bo_table=free)은 /rss/free로 301 리다이렉트된다. fetch()가
 // 리다이렉트를 자동으로 따라가므로 동작에는 문제없지만 신규 URL을 직접 사용한다.
 const RSS_URL = "https://damoang.net/rss/free";
 
 export async function fetchDamoang(): Promise<RawPost[]> {
-  const res = await fetch(RSS_URL, {
+  const res = await fetchTracked(RSS_URL, {
     headers: {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",

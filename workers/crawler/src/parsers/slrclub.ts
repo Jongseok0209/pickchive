@@ -1,10 +1,10 @@
-import { parseIntSafe, type RawPost } from "../types";
+import { parseIntSafe, fetchTracked, type RawPost } from "../types";
 
 const LIST_URL = "https://www.slrclub.com/bbs/zboard.php?id=best_article";
 const BASE_URL = "https://www.slrclub.com";
 
 export async function fetchSlrclub(): Promise<RawPost[]> {
-  const res = await fetch(LIST_URL, {
+  const res = await fetchTracked(LIST_URL, {
     headers: {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",

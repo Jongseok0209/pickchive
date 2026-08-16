@@ -35,9 +35,21 @@ function formatTime(dateStr: string): string {
   return timeFormatter.format(date);
 }
 
+// "실패 중"은 최근 시도가 실패했다는 뜻이 아니라 "지금 수집이 안 되고 있다"는
+// 뜻이어야 한다. 예전엔 마지막 시도 한 건만 보고 판정해서, 96/102회 성공하는
+// 멀쩡한 사이트도 하필 마지막 시도가 실패면 "실패 중"으로 찍혔다 — 여러 수집
+// 경로(크론·GitHub Actions·맥미니)가 몇 초 차이로 같은 사이트를 치기 때문에
+// 실제로 "4초 전엔 성공, 방금은 실패" 같은 상황이 흔하다(2026-08-16 실측:
+// SLR클럽 21:55:04 성공 / 21:55:08 실패). 그래서 최근 성공이 얼마나 됐는지로
+// 판정한다.
+const FAILING_MINUTES = 30; // 이 시간 안에 성공이 한 번도 없으면 진짜 실패 중
+
 function classify(site: SiteCrawlHealth): Status {
   if (!site.lastAttemptAt) return "no-attempt";
-  if (site.lastAttemptOk === 0) return "failing";
+  const successAge = site.lastSuccessAt
+    ? minutesSince(site.lastSuccessAt)
+    : Infinity;
+  if (successAge > FAILING_MINUTES) return "failing";
   if (minutesSince(site.lastAttemptAt) > STALE_MINUTES) return "stale";
   return "ok";
 }
@@ -185,11 +197,14 @@ const recentRuns = await getRecentCrawlRuns(80);
     <ul class="mt-4">
       {
         sites.map(({ site, status }) => {
+          // 상대 시간만 쓰면 분 단위로 반올림돼서, 3분 12초 전 "실패"와 3분 51초
+          // 전 "성공"이 둘 다 "3분 전"으로 찍혀 서로 모순돼 보인다(실제 혼란 발생).
+          // 정확한 시각을 같이 붙여서 두 사건의 선후를 분명히 보여준다.
           const lastAttemptLabel = site.lastAttemptAt
-            ? formatElapsedLabel(site.lastAttemptAt, "마지막 시도")
+            ? `마지막 시도 ${formatTime(site.lastAttemptAt)} (${site.lastAttemptOk ? "성공" : "실패"}, ${formatElapsedLabel(site.lastAttemptAt, "").trim()})`
             : null;
           const lastSuccessLabel = site.lastSuccessAt
-            ? formatElapsedLabel(site.lastSuccessAt, "마지막 성공")
+            ? `마지막 성공 ${formatTime(site.lastSuccessAt)} (${formatElapsedLabel(site.lastSuccessAt, "").trim()})`
             : null;
           return (
             <li class="border-border border-b py-3">
@@ -207,7 +222,9 @@ const recentRuns = await getRecentCrawlRuns(80);
               <div class="text-foreground/60 mt-1 flex flex-wrap gap-x-3 text-xs">
                 <span>보관 중인 글 {site.postCount}개</span>
                 {lastAttemptLabel && <span>{lastAttemptLabel}</span>}
-                {lastSuccessLabel && status !== "ok" && (
+                {/* 마지막 시도가 실패였으면, 직전 성공이 언제였는지가 "일시적
+                    실패인지 계속 실패인지" 판단에 꼭 필요하다 */}
+                {lastSuccessLabel && !site.lastAttemptOk && (
                   <span>{lastSuccessLabel}</span>
                 )}
                 {site.attempts24h > 0 && (
@@ -216,7 +233,7 @@ const recentRuns = await getRecentCrawlRuns(80);
                   </span>
                 )}
               </div>
-              {status !== "ok" && site.lastError && (
+              {!site.lastAttemptOk && site.lastError && (
                 <p class="mt-1 text-xs break-words text-red-600/80">
                   {site.lastError}
                 </p>

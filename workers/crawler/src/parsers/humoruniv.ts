@@ -1,4 +1,4 @@
-import { parseIntSafe, type RawPost } from "../types";
+import { parseIntSafe, fetchTracked, type RawPost } from "../types";
 
 // st=day: 오늘의 베스트. 파라미터 없이 table=pds만 쓰면 그냥 최신 등록순이라
 // 조회수/추천수 낮은 글이 섞여 들어온다.
@@ -10,7 +10,7 @@ const LIST_URL = "http://web.humoruniv.com/board/humor/list.html?table=pds&st=da
 const BASE_URL = LIST_URL;
 
 export async function fetchHumoruniv(): Promise<RawPost[]> {
-  const res = await fetch(LIST_URL, {
+  const res = await fetchTracked(LIST_URL, {
     headers: {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",

@@ -1,4 +1,4 @@
-import { parseIntSafe, type RawPost } from "../types";
+import { parseIntSafe, fetchTracked, type RawPost } from "../types";
 
 const LIST_URL = "https://mlbpark.donga.com/mp/b.php?b=bullpen";
 const BASE_URL = "https://mlbpark.donga.com";
@@ -67,7 +67,7 @@ function parseRows(html: string): RawPost[] {
 // 불확실한 반면 GitHub Actions 실행 시간/복잡도만 늘어난다.
 export async function fetchMlbpark(): Promise<RawPost[]> {
   for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(LIST_URL, {
+    const res = await fetchTracked(LIST_URL, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",

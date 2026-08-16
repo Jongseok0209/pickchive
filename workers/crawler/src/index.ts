@@ -1,4 +1,4 @@
-import type { Env } from "./types";
+import { describeLastFetch, resetLastFetchInfo, type Env } from "./types";
 import {
   getSiteId,
   upsertPosts,
@@ -42,6 +42,7 @@ async function crawlSite(
   let posts: Awaited<ReturnType<typeof fetchClien>> = [];
   let lastError: string | undefined;
 
+  resetLastFetchInfo();
   for (let attempt = 0; attempt < attempts; attempt++) {
     try {
       posts = await fetcher();
@@ -54,6 +55,16 @@ async function crawlSite(
     if (attempt < attempts - 1) {
       await new Promise(resolve => setTimeout(resolve, 700 * (attempt + 1)));
     }
+  }
+
+  // 실패했는데 이유가 없으면(= 예외 없이 그냥 0건) /status에 아무 근거도 안 뜬다.
+  // 대부분의 실패가 이 형태라 예전엔 "실패"라고만 뜨고 끝이었다. 마지막 응답의
+  // 상태코드/콜로를 근거로 반드시 남긴다(types.ts 주석 참고).
+  if (posts.length === 0) {
+    const fetchDesc = describeLastFetch();
+    lastError = lastError
+      ? `${lastError} (${fetchDesc})`
+      : `0건 수집 — 응답은 받았으나 목록이 비어있음 (${fetchDesc})`;
   }
 
   if (posts.length > 0) {
@@ -270,7 +281,14 @@ export default {
         // Playwright 경유 사이트(펨코/루리웹/다모앙)도 /health·/status에서 같이 보이도록
         // 기록한다. 0건이어도 반드시 호출되므로(scripts/crawl_protected.ts 참고) 실패한
         // 시도도 "시도 안 함"이 아니라 정확히 "실패"로 남는다.
-        await recordCrawlRun(env.DB, body.slug, body.posts.length, body.error);
+        // 외부 수집기가 error를 안 보냈는데 0건이면, 최소한 "이유 없음"이 아니라
+        // 어느 경로에서 온 0건인지는 남긴다 — /status에 근거 없는 "실패"가 뜨지 않도록.
+        const ingestError =
+          body.error ??
+          (body.posts.length === 0
+            ? "0건 수집 — 외부 수집기(/ingest)가 빈 목록을 보냄"
+            : undefined);
+        await recordCrawlRun(env.DB, body.slug, body.posts.length, ingestError);
         console.log(`[${body.slug}] ingested ${body.posts.length} posts`);
         return new Response(`Ingested ${body.posts.length} posts for ${body.slug}`, { status: 200 });
       } catch (err: any) {

@@ -1,10 +1,10 @@
-import { parseIntSafe, type RawPost } from "../types";
+import { parseIntSafe, fetchTracked, type RawPost } from "../types";
 
 const LIST_URL = "https://m.ruliweb.com/best/humor/now";
 const BASE_URL = "https://m.ruliweb.com";
 
 export async function fetchRuliweb(): Promise<RawPost[]> {
-  const res = await fetch(LIST_URL, {
+  const res = await fetchTracked(LIST_URL, {
     headers: {
       "User-Agent":
         "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",

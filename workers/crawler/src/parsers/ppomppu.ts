@@ -1,4 +1,4 @@
-import { parseIntSafe, type RawPost } from "../types";
+import { parseIntSafe, fetchTracked, type RawPost } from "../types";
 
 const LIST_URL = "https://www.ppomppu.co.kr/zboard/zboard.php?id=freeboard";
 
@@ -7,7 +7,7 @@ const BROWSER_UA =
 
 // 뽐뿌는 EUC-KR로 응답하므로 HTMLRewriter(UTF-8 가정)에 넘기기 전에 직접 디코딩한다.
 async function fetchAsUtf8(url: string): Promise<Response> {
-  const res = await fetch(url, {
+  const res = await fetchTracked(url, {
     headers: { "User-Agent": BROWSER_UA, "Accept-Language": "ko-KR,ko;q=0.9" },
   });
   const buf = await res.arrayBuffer();
