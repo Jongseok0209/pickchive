@@ -20,13 +20,22 @@ const hasFilterParams =
   Astro.url.searchParams.has("window") ||
   Astro.url.searchParams.has("sort") ||
   Astro.url.searchParams.has("site");
+// "전체/3시간/종합"처럼 전부 기본값으로 되돌리는 클릭은 window/sort/site를 전부
+// 생략한 "/" 그대로라 hasFilterParams만으로는 "필터 없이 맨 처음 들어온 것"과
+// 구분이 안 된다 — 로그인 상태에서 저장된 필터가 있으면 "전체"를 눌러도 그
+// 저장된 값으로 계속 되돌아가 버리는 버그가 있었다(2026-08-16 확인: 필터를
+// 기본값으로 되돌리는 시도가 계속 씹히는 것처럼 보임). buildUrl/buildClientUrl이
+// 전부 기본값인 링크를 만들 때 reset=1을 붙여 "명시적으로 고른 기본값"임을
+// 표시하고, 클라이언트에서 로드 직후 주소창에서만 지운다.
+const isExplicitReset = Astro.url.searchParams.get("reset") === "1";
+const hasExplicitFilterIntent = hasFilterParams || isExplicitReset;
 const userId = await Astro.session?.get("userId");
 
 // 로그인한 회원이 필터 없이 맨 홈으로 들어오면, 하드코딩된 기본값 대신 마지막으로
-// 쓴 필터를 기본으로 깔아준다. 반대로 필터가 붙은(공유 링크 등 포함) 요청이면
-// 하드코딩 값이 아니라 그 필터를 저장해서 다음 방문에 이어지게 한다.
+// 쓴 필터를 기본으로 깔아준다. 반대로 필터가 붙었거나(공유 링크 등 포함) 명시적
+// 리셋이면 하드코딩 값이 아니라 그 필터를 저장해서 다음 방문에 이어지게 한다.
 const savedPrefs =
-  !hasFilterParams && userId ? await getUserFilterPrefs(userId) : null;
+  !hasExplicitFilterIntent && userId ? await getUserFilterPrefs(userId) : null;
 
 const windowParam =
   Astro.url.searchParams.get("window") ?? savedPrefs?.window ?? DEFAULT_WINDOW;
@@ -38,7 +47,7 @@ const siteParam =
   Astro.url.searchParams.get("site") ?? savedPrefs?.site ?? "";
 const selectedSites = siteParam.split(",").filter(Boolean);
 
-if (hasFilterParams && userId) {
+if (hasExplicitFilterIntent && userId) {
   await saveUserFilterPrefs(userId, {
     window: windowParam,
     sort: sortParam,
@@ -71,6 +80,10 @@ function buildUrl(overrides: Record<string, string | null>): string {
     params.set("window", merged.window);
   if (merged.sort && merged.sort !== "score") params.set("sort", merged.sort);
   if (merged.site) params.set("site", merged.site);
+  // 세 필터가 전부 기본값으로 되돌아가는 링크(예: "전체" 버튼)는 파라미터가 다
+  // 빠져서 "필터 없이 맨 처음 들어온 것"과 구분이 안 된다 — 로그인 사용자의
+  // 저장된 필터를 되살리는 로직이 이걸 가로채 버리지 않도록 명시 표시를 남긴다.
+  if (params.toString() === "") params.set("reset", "1");
   const qs = params.toString();
   return qs ? `/?${qs}` : "/";
 }
@@ -91,6 +104,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     data-window={windowParam}
     data-sort={sortParam}
     data-site={siteParam}
+    data-reset={isExplicitReset ? "1" : ""}
     data-next-offset={nextOffset ?? ""}
   >
     <section class="border-border border-b pt-6 pb-4">
@@ -452,6 +466,15 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
     const loadingEl = document.querySelector<HTMLElement>("#loading-indicator");
     if (!main || !list || !sentinel || !loadingEl) return;
 
+    // reset=1은 서버에게만 필요한 표시(로그인 사용자의 저장된 필터를 되살리지
+    // 말라는 신호)라 화면 주소창/공유 링크에는 남길 필요가 없다 — 로드 직후
+    // 한 번만 조용히 지운다.
+    if (main.dataset.reset === "1") {
+      const url = new URL(location.href);
+      url.searchParams.delete("reset");
+      history.replaceState(history.state, "", url.pathname + url.search);
+    }
+
     applyReadStyles(list);
 
     let nextOffset: number | null = main.dataset.nextOffset
@@ -695,6 +718,9 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
         params.set("window", state.window);
       if (state.sort && state.sort !== "score") params.set("sort", state.sort);
       if (state.site) params.set("site", state.site);
+      // buildUrl(서버 쪽)과 동일하게, 전부 기본값으로 되돌아가는 링크에는 reset=1을
+      // 남겨서 로그인 사용자의 저장된 필터 복원 로직이 가로채지 않게 한다.
+      if (params.toString() === "") params.set("reset", "1");
       const qs = params.toString();
       return qs ? `/?${qs}` : "/";
     }
@@ -715,9 +741,14 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
         .querySelectorAll<HTMLAnchorElement>("a[data-site-value]")
         .forEach(a => {
           const value = a.dataset.siteValue || "";
-          const toggled = currentSites.includes(value)
-            ? currentSites.filter(s => s !== value)
-            : [...currentSites, value];
+          // "전체" 핀(data-site-value="")을 다른 사이트처럼 토글 대상에 넣으면
+          // currentSites에 빈 문자열이 그대로 얹혀서 "전체"를 눌러도 실제로는
+          // 선택이 안 풀리는 버그가 있었다 — "전체"는 항상 선택 전체 해제로 고정.
+          const toggled = !value
+            ? []
+            : currentSites.includes(value)
+              ? currentSites.filter(s => s !== value)
+              : [...currentSites, value];
           a.href = buildClientUrl({
             site: toggled.length ? toggled.join(",") : undefined,
           });
