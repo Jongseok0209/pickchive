@@ -16,6 +16,10 @@ async function fetchTodayhumorList(listUrl: string): Promise<RawPost[]> {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       "Accept-Language": "ko-KR,ko;q=0.9",
+      Referer: "https://www.todayhumor.co.kr/",
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "same-origin",
     },
   });
 
@@ -140,11 +144,12 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// 8회(최대 백오프 합 ~19.6초)로 뒀더니 scheduled()의 사이트별 처리 시간이 늘어나
-// 다른 사이트들이 밀리는 문제와 시점이 겹쳤다(2026-08-16). scheduled() 쪽에
-// 사이트당 15초 타임아웃을 따로 걸었지만, 그 한도 안에 여유 있게 들어오도록
-// 5회(최대 백오프 합 ~7초)로 낮춘다.
-const RETRY_ATTEMPTS = 5;
+// scheduled()가 사이트별로 15초 타임아웃(Promise.race)을 따로 걸어주고 있어서,
+// 여기서 재시도를 늘려도 크론 배치가 다시 CPU 제한에 걸리진 않는다 — 타임아웃이
+// 걸리면 이 사이트만 이번 턴에 실패로 끝날 뿐 다른 사이트에 영향이 없다(2026-08-16
+// 확인: 5회로 낮춘 건 불필요한 과잉대응이었음). GitHub Actions/수동 호출 쪽은 사이트당
+// 개별 요청이라 더더욱 시간 여유가 있다. 10회(최대 백오프 합 ~31.5초)로 올린다.
+const RETRY_ATTEMPTS = 10;
 
 // 게시판 하나씩 완전히 독립적으로 재시도한다. 예전엔 crawlSite의 공용 재시도
 // 루프가 fetchTodayhumor() 전체(두 게시판 다)를 한 단위로 재시도해서, humorbest만

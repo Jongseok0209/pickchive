@@ -32,13 +32,37 @@ function decodeEntities(s) {
     .replace(/&#0*39;/g, "'");
 }
 
+// User-Agent 하나만 보내던 걸 실제 브라우저가 보내는 헤더 세트에 가깝게
+// 보강했다(Accept/Accept-Language/Referer/sec-fetch-* 등). 매번 완전히
+// 새 연결로 요청 하나만 보내는 것도 봇처럼 보일 수 있어서, 응답의
+// Set-Cookie를 다음 요청에 그대로 실어 보내 세션이 이어지는 것처럼
+// 흉내낸다(2026-08-16, 홈 IP도 몇 시간씩 HTTP 430으로 막히는 문제 대응).
+let cookieJar = "";
+
 async function crawlFmkorea() {
   const res = await fetch(LIST_URL, {
     headers: {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      Accept:
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+      Referer: "https://www.fmkorea.com/",
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "same-origin",
+      "Upgrade-Insecure-Requests": "1",
+      ...(cookieJar ? { Cookie: cookieJar } : {}),
     },
   });
+
+  const setCookie = res.headers.get("set-cookie");
+  if (setCookie) {
+    cookieJar = setCookie
+      .split(/,(?=[^ ]+=)/)
+      .map(c => c.split(";")[0])
+      .join("; ");
+  }
 
   const html = await res.text();
 
