@@ -5,25 +5,38 @@
 새로운 결정/변경이 생기면 이 파일을 갱신할 것 (새 파일 만들지 말고).
 
 - 라이브 사이트: https://pickchive.com (커스텀 도메인, 2026-08-15 연결) / https://pickchive.won0209.workers.dev (workers.dev, 계속 병행 유지)
-- 크롤 상태 대시보드: https://pickchive.com/status — 사이트별 마지막 시도/성공, 24시간 실패 횟수를 심각도 순으로 보여줌
+- 크롤 상태 대시보드: https://pickchive.com/status — **크롤 문제 진단은 여기부터 볼 것.** 크론 배치 진단(스케줄러 정상/멈춤/중간 사망) + 최근 수집 시도 시간순 로그(전 경로 통합, 시:분:초·에러 메시지) + 사이트별 요약. 상세는 함정 18 참고.
 - GitHub: https://github.com/Jongseok0209/pickchive (public)
 - Cloudflare 계정: won0209@gmail.com
 
 ## 아키텍처
 
 ```
-GitHub Actions (5분마다) ─┬─▶ pickchive-crawler (Workers /crawl) ──────▶ D1 (pickchive-db)
-                           │                                                 ▲
-                           └─▶ Playwright Headless Browser ─▶ (/ingest) ────┘
-                                (펨코 / 루리웹 WAF 보호, 다모앙 Turnstile 챌린지)
-                                                                             ▲
-Astro SSR (pickchive, Workers+Assets) ───────────────────────────────────────┘
+Cloudflare Cron (1분마다 1개씩 로테이션) ─▶ pickchive-crawler (Workers) ──▶ D1 (pickchive-db)
+                                                                              ▲
+GitHub Actions (백업, 실측 20~60분 간격) ─┬─▶ /crawl?site=... ────────────────┤
+                                          └─▶ Playwright ─▶ /ingest ─────────┤
+                                               (루리웹 WAF, 다모앙 Turnstile)  │
+                                                                              │
+맥미니 launchd (5분마다, 한국 가정용 IP) ──▶ /ingest ──────────────────────────┤
+  └─ 펨코, 오늘의유머 (둘 다 해외/데이터센터 IP 차단이라 여기서만 수집)         │
+                                                                              ▲
+Astro SSR (pickchive, Workers+Assets) ────────────────────────────────────────┘
   └─ 회원가입/로그인/댓글/신고도 같은 워커의 API 라우트
 ```
 
+**수집 경로별 담당 사이트 (2026-08-16 기준)**
+
+| 경로 | 사이트 |
+|---|---|
+| Cloudflare Cron + GitHub Actions | 클리앙, 뽐뿌, 보배드림, 82cook, 인벤, 딴지일보, 웃긴대학, 이토랜드, 엠팍, SLR클럽, 다모앙 (11개) |
+| GitHub Actions Playwright | 루리웹, 다모앙 |
+| **맥미니 launchd (한국 홈 IP)** | **펨코, 오늘의유머** |
+
 - **프론트+API**: `/` (루트) — Astro, `@astrojs/cloudflare` 어댑터, `output: "server"`. Worker 이름 `pickchive`.
-- **크롤러**: `/workers/crawler` — 별도 Worker(`pickchive-crawler`), 14개 사이트 파서 + D1 upsert + `/ingest` POST 라우트. HTTP 수동/외부 트리거 가능.
-- **WAF 우회 수집기**: `scripts/crawl_protected.ts` — GitHub Actions 내 Playwright Headless 브라우저로 펨코, 루리웹, 다모앙 수집 후 `/ingest` API로 업서트. 다모앙은 RSS(일반 크롤 경로, `fetchDamoang`)도 병행 — RSS는 title/author/date만 제공하니 Playwright가 조회수/추천수/댓글수를 덮어써서 보강하는 구조.
+- **크롤러**: `/workers/crawler` — 별도 Worker(`pickchive-crawler`), 14개 사이트 파서 + D1 upsert + `/ingest` POST 라우트. HTTP 수동/외부 트리거 가능. **크론은 CPU 제한 때문에 한 번에 1개 사이트만 처리하고 D1 커서로 이어간다 (함정 16 참고).**
+- **WAF 우회 수집기**: `scripts/crawl_protected.ts` — GitHub Actions 내 Playwright Headless 브라우저로 루리웹, 다모앙 수집 후 `/ingest` API로 업서트. 다모앙은 RSS(일반 크롤 경로, `fetchDamoang`)도 병행 — RSS는 title/author/date만 제공하니 Playwright가 조회수/추천수/댓글수를 덮어써서 보강하는 구조. (펨코는 데이터센터 IP 차단으로 100% 실패라 2026-08-16에 제거 — 함정 6-1 참고.)
+- **IP 차단 우회 수집기(맥미니)**: `scripts/crawl_fmkorea_home.mjs`(펨코), `scripts/crawl_todayhumor_home.mjs`(오늘의유머) — 각각 `~/Library/LaunchAgents/com.pickchive.crawl-{fmkorea,todayhumor}.plist`로 5분 간격 실행, 로그는 `~/Library/Logs/pickchive/`. **두 사이트 모두 Workers/GitHub Actions IP로는 원천적으로 수집 불가**(함정 6-1, 11-1). 워커 파서는 HTMLRewriter(Workers 전용)라 이쪽은 Node용 정규식 파서로 따로 구현되어 있다 — **파서 수정 시 양쪽 다 손봐야 한다.**
 - **DB**: Cloudflare D1 `pickchive-db` (`72c72958-3bcc-4c93-85c8-8f6e82c87022`). 마이그레이션은 루트 `/migrations`. D1 파라미터 제약(100개 이하)을 고려해 batch query는 40개 단위로 청킹.
 - **인증**: Astro Session(KV `SESSION`, 어댑터가 자동 프로비저닝) + 아이디/비밀번호(PBKDF2). 이메일·OAuth 없음, 비번 찾기 없음(의도적).
 - **어뷰징 방지**: Cloudflare Turnstile(가입 시) + KV 기반 rate limit(`src/lib/ratelimit.ts`).
@@ -33,22 +46,42 @@ Astro SSR (pickchive, Workers+Assets) ──────────────
 1. **`@astrojs/cloudflare` 최신 버전은 Pages가 아니라 Workers+Assets를 타겟팅한다.** `wrangler pages deploy`가 아니라 `wrangler deploy`로 배포. Pages 프로젝트를 따로 만들면 이름 충돌로 배포가 막힘.
 2. **빌드 캐시가 변경사항을 반영 안 할 때가 있다.** 배포 전 `rm -rf dist .astro node_modules/.vite` 후 재빌드하는 습관 들일 것.
 3. **`cloudflare:workers`의 `env`는 전역 `Env`가 아니라 `Cloudflare.Env` 네임스페이스를 씀.** `src/env.d.ts`에서 `declare namespace Cloudflare { interface Env {...} }`로 확장해야 타입이 잡힘.
-4. **Cloudflare Cron Trigger 버그로 인해 GitHub Actions가 수집을 주도한다.** `.github/workflows/crawl.yml`이 5분마다 `pickchive-crawler` HTTP 엔드포인트 및 Playwright script(`crawl_protected.ts`)를 호출함.
+4. **주 스케줄러는 Cloudflare Cron이고, GitHub Actions는 백업이다.** (초기엔 함정 13번 버그 때문에 Cron이 죽은 것처럼 보여 GH Actions가 주도했으나 2026-08-15에 정정됨.) GH Actions의 `schedule`은 5분으로 설정해도 **실측 20~60분 간격으로만 실행된다**(GitHub이 스케줄 이벤트를 지연·병합, 우리가 못 고침). 다만 GH Actions는 사이트마다 개별 HTTP 요청이라 CPU 누적이 없어 한 번에 전 사이트를 돌 수 있다는 장점이 있어 백업으로 유지한다.
 5. **`workers/crawler`에서 `wrangler` 명령 쓸 때 `--config wrangler.jsonc`를 명시해야 한다.** 상위 디렉토리(루트 프로젝트)의 `.wrangler/deploy/config.json`과 충돌 방지.
 6-1. **펨코는 데이터센터 IP를 전부 차단한다 — GitHub Actions뿐 아니라 Cloudflare Workers도, 모바일(m.fmkorea.com)도 동일 (2026-08-15 확정).** `/debug-fetch`로 Workers에서 직접 찔러보면 HTTP 430 + "에펨코리아 보안 시스템" 페이지 — JS 챌린지가 아니라 순수 IP 평판 차단이라 Playwright로도 못 뚫음. RSS/API 우회 경로도 없음(`act=rss`도 그냥 HTML로 리다이렉트). 가정용 IP는 안 막혀 있어서, **상시 켜져 있는 맥미니에서 `scripts/crawl_fmkorea_home.mjs`를 launchd(`~/Library/LaunchAgents/com.pickchive.crawl-fmkorea.plist`, 5분 간격)로 돌려 `/ingest`에 직접 전송하는 방식으로 해결함(2026-08-15).** 헤드리스 브라우저 불필요 — plain fetch로 서버가 완성된 HTML을 그대로 줌. 조회수는 "5만" 같은 만 단위 축약이라 숫자만 남기면 5로 잘못 읽히니 별도 파싱 필요.
+
+    **(2026-08-16 추가) 펨코를 GitHub Actions Playwright 경로에서도 완전히 제거했다.** 러너가 데이터센터 IP라 100% 차단되는데(24시간 50회 시도 전부 실패, 성공 0회), 이 실패 기록이 맥미니(홈 IP) 성공 기록과 같은 `crawl_runs`에 뒤섞이면서 **펨코가 "됐다 안 됐다" 하는 것처럼 보이게 만들어 원인 파악을 크게 방해했다.** 실패 메시지로 두 경로를 구분할 수 있다 — 맥미니는 `HTTP 430`, GH Actions Playwright는 `0 posts after retries. url=...listStyle=list title=에펨코리아 보안 시스템`. **성공할 수 없는 수집 경로는 남겨두지 말 것 — 노이즈가 진짜 문제를 가린다.**
 6. **펨코와 루리웹은 WAF(Cloudflare Turnstile/522 차단)로 인해 Worker 아웃바운드가 막힘.** GitHub Actions 내 Playwright 브라우저로 DOM 수집 후 `/ingest` API로 전달하는 방식으로 해결. 다모앙도 동일 — `/free` HTML 목록이 Cloudflare Turnstile로 막혀있어 일반 `fetch()`로는 우회 불가하지만 헤드리스 브라우저는 통과함(2026-08-14 확인).
 7. **저작권 원칙: 본문/이미지 전체를 절대 가져오지 않는다.** 제목·링크·작성자·조회수·추천수·댓글수·시간 메타데이터만 저장하고 원문은 외부 링크로 연결.
 8. **D1 SQL Variable 수 제한 (최대 100개 이하).** 140+ 개 이상의 포스트 업서트 시 40개 단위 `chunkArray`로 청킹하여 실행해야 에러 방지됨 (`workers/crawler/src/db.ts`).
 9. **82cook은 목록에 추천수 컬럼 자체가 없음, ppomppu/todayhumor는 목록에 댓글수 컬럼 자체가 없음.** 해당 필드는 0/null이 정상이며 파싱 버그가 아니다.
 10. **`scripts/crawl_protected.ts`는 CI에서 `npx tsx`로 실행되는데, `page.evaluate()` 콜백 안에 이름 붙은 함수(화살표 함수를 `const`에 대입하는 것 포함)를 선언하면 tsx(esbuild)가 브라우저 컨텍스트에 없는 `__name` 헬퍼를 참조해 매번 `ReferenceError`로 실패한다** (node로는 재현 안 됨, tsx 전용 버그, 2026-08-14 확인). evaluate 콜백 안에서는 텍스트만 추출하고, 숫자 변환 등은 콜백 바깥(일반 Node 스코프)에서 처리할 것.
 11. **mlbpark(`mp/b.php?b=bullpen`)는 같은 요청을 반복해도 서버렌더링 HTML과 빈 클라이언트 렌더링 셸을 비결정적으로 번갈아 준다**(원인 미특정, 2026-08-14 재현 확인). `fetchMlbpark`가 빈 결과일 때 최대 3회 재시도하도록 되어있음. 추천수(`recommend_count`)는 정상 응답에서도 아직 셀렉터를 못 찾아 0으로 고정.
-11-1. **오늘의유머도 mlbpark와 같은 비결정성이 있다** — 차단이 아니라 같은 요청도 서버가 빈 목록/정상 목록을 랜덤하게 섞어 줌(2026-08-14 밤 14시간 연속 0건이다가, 수동으로 두 번 연달아 찔러보니 그중 한 번은 정상 30건, `/debug-fetch`로 raw HTML 자체엔 데이터가 있는 것도 확인함). 기본 재시도 3회로는 실패율이 너무 높아 `todayhumor`만 6회로 늘림(`CRAWL_FETCHERS`의 `crawlSite` 네 번째 인자). 근본 원인(오늘의유머 서버 쪽)은 미해결.
+11-1. **오늘의유머는 해외 IP를 HTTP 403으로 차단한다 — "서버 비결정성"이 아니었다 (2026-08-16 확정).** 예전엔 "같은 요청에도 빈 목록/정상 목록을 랜덤하게 준다"고 기록해뒀는데 **틀린 진단이었다.** 실제 원인은 지리적 차단이고, 랜덤해 보였던 건 **Cloudflare 크론이 매번 다른 콜로에서 실행되기 때문**이다(한국/홍콩 콜로에 걸리면 성공, 해외 콜로면 403). 결정적 증거는 실패 기록에 실행 콜로를 남기도록 계측해서 얻었다:
+
+    ```
+    0 posts (empty list) [colo=CDG status=403]
+    ```
+
+    같은 시각 한국 엣지에서 실행되는 수동 `curl /crawl?site=todayhumor`는 24회 연속 전부 성공(60건). **Cloudflare 크론은 실행 콜로를 제어할 수 없으므로 워커에 두는 한 영구적으로 복불복이다.** 그래서 펨코와 같이 맥미니(한국 가정용 IP) launchd 경로로 옮겼다 — `scripts/crawl_todayhumor_home.mjs` + `~/Library/LaunchAgents/com.pickchive.crawl-todayhumor.plist`(5분 간격). 워커 파서는 HTMLRewriter(Workers 전용)라 Node용 정규식 파서로 다시 구현했다. 크론 로테이션과 GitHub Actions 워크플로에서는 제거함(성공할 수 없는 경로라 실패 기록만 쌓여 진단을 방해했음).
+
+    **교훈: "랜덤하게 실패한다"고 보이면 실행 환경(콜로/IP)이 매번 다른 건 아닌지 먼저 의심할 것.** 실패 로그에 실행 위치를 남기지 않으면 이런 원인은 절대 못 찾는다.
 12. **루트 `package.json`의 `deploy` 스크립트(`wrangler pages deploy ./dist`)는 함정 1번과 모순된다.** 실제로는 `wrangler deploy`를 써야 함 — 프론트 배포 시 스크립트를 그대로 믿지 말고 직접 확인할 것. (2026-08-15: `npm run deploy`를 아래 13번 패치까지 포함해 정리함. 이제 이 스크립트만 믿고 써도 됨.)
 13. **Cloudflare Worker는 자기 자신의 공개 URL(`*.workers.dev`)로 `fetch()`할 수 없다 — 에러 1042(Worker to Worker Request 차단).** 크롤러의 `scheduled()`가 CPU 예산을 나누려고 사이트마다 자기 자신에게 subrequest를 보내던 방식이 이것 때문에 매번 전 사이트 404로 실패하고 있었음(Cloudflare Cron은 실제로 5분마다 발화하고 있었는데, 이 버그 때문에 GitHub Actions 백업만 동작하는 것처럼 보였던 것 — 2026-08-14/15 확인). subrequest 없이 같은 invocation 안에서 크롤 함수를 직접 호출하도록 수정(`CRAWL_FETCHERS` 맵).
 14. **`@astrojs/cloudflare`가 빌드 시 만드는 `dist/server/wrangler.json`은 루트 `wrangler.jsonc`의 모든 필드를 옮기지 않는다 — `workers_dev`가 대표적으로 빠진다.** `routes`(custom_domain)를 추가하면 이 때문에 `workers.dev` 주소가 매 배포마다 조용히 꺼진다(에러 1042로 나타남, pickchive.com 연결 직후 확인). `scripts/patch-workers-dev.mjs`로 빌드 후 그 파일에 직접 주입해서 해결, `npm run deploy`에 포함됨.
-15. **크롤러 워커에 `/debug-fetch?url=...` 진단 라우트가 있다.** Workers 쪽에서 특정 URL에 실제로 어떤 응답(상태코드/제목/본문 일부)을 받는지 바로 확인할 수 있음 — 사이트별 차단/비결정성 디버깅할 때 이것부터 찔러볼 것.
+15. **크롤러 워커에 `/debug-fetch?url=...` 진단 라우트가 있다.** Workers 쪽에서 특정 URL에 실제로 어떤 응답(상태코드/제목/본문 일부)을 받는지 바로 확인할 수 있음 — 사이트별 차단/비결정성 디버깅할 때 이것부터 찔러볼 것. **단, 이 라우트는 요청을 보낸 사람의 위치에 가까운 콜로에서 실행되므로 크론이 겪는 상황과 다를 수 있다**(11-1 참고) — 응답의 `cfRay` 끝자리로 어느 콜로에서 나간 요청인지 확인할 것.
 
-## 현재 상태 (2026-08-15 기준)
+16. **크론 `scheduled()`에서 12개 사이트를 한 invocation 안에 다 돌리면 Cloudflare Workers CPU 시간 제한에 걸려 강제 종료된다 (2026-08-16 확정).** 증상이 고약한데, **배열 첫 번째 사이트(clien)만 성공하고 나머지는 통째로 조용히 사라진다** — 예외가 아니라 런타임 강제 종료라 `try/catch`로 못 잡고, 사이트별 타임아웃 가드로도 못 막는다. `wrangler tail`로 실시간 로그를 봐야 `"Exceeded CPU Limit"`이 보인다. 3개씩 묶어도 여전히 죽는다.
+
+    해결: **한 번의 실행에서 사이트 1개만 처리하고, D1(`cron_cursor`)에 저장한 커서로 다음 실행에 이어간다.** 처리량은 `BATCH_SIZE`를 올리는 대신 **1분 오프셋 크론을 5개 등록**해서 확보한다(`*/5`, `1-59/5`, `2-59/5`, `3-59/5`, `4-59/5`) — invocation당 CPU 사용량은 그대로 두고 빈도만 5배로 늘리는 방식. 전체 로테이션 주기 60분 → 12분.
+
+17. **크론이 "아예 안 도는지" vs "돌긴 하는데 중간에 죽는지"는 `crawl_runs`만 봐서는 구분할 수 없다.** 위 16번을 진단할 때 사이트별 마지막 시도 시각을 일일이 역추적해야 했던 게 가장 큰 시간 낭비였다. 그래서 `cron_batches` 테이블을 추가해 **`scheduled()` 시작 시점에 행을 먼저 심고(`finished_at` = null) 끝나면 업데이트하는 2단계 기록** 방식을 쓴다 — CPU 제한처럼 잡을 수 없는 강제 종료가 나도 "시작은 했는데 안 끝난" 흔적이 그대로 남는다. `/status` 페이지의 "크론 배치 진단" 섹션이 이걸 보여준다.
+
+18. **`/status` 페이지가 크롤 문제 진단의 1차 도구다.** 세 섹션으로 구성: (1) 크론 배치 진단 — 스케줄러 자체가 멈췄는지/중간에 죽었는지, (2) 최근 수집 시도 시간순 로그 — Cloudflare 크론·GitHub Actions·맥미니 전부 합쳐 시:분:초 단위로 어느 사이트가 언제 성공/실패했는지와 에러 메시지, (3) 사이트별 요약. **여러 수집 경로가 같은 테이블에 기록되므로 에러 메시지로 경로를 구분해야 한다**(위 6-1 참고).
+
+19. **크롤 실패를 기록할 때는 실패 "이유"를 반드시 남길 것.** 오늘의유머가 오래 미궁이었던 이유 중 하나가, 빈 목록을 받는 경우엔 예외가 발생하지 않아 `crawl_runs.error`가 `null`로 남아서 `/status`에 아무 이유도 안 뜬 것이었다(펨코는 HTTP 430 같은 명시적 에러라 메시지가 남는 것과 대조적). 빈 결과도 명시적으로 `throw`해서 이유를 남기고, **가능하면 실행 환경 정보(콜로/상태코드)까지 함께 기록할 것** — 11-1번 원인을 찾아낸 게 정확히 이것이다.
+
+## 현재 상태 (2026-08-16 기준)
 
 완료:
 - [x] Astro+Cloudflare 스캐폴딩 (AstroPaper 테마 기반, 블로그 기능 제거)
@@ -85,13 +118,25 @@ Astro SSR (pickchive, Workers+Assets) ──────────────
 - [x] 개인정보처리방침 `/privacy` 페이지 추가 (2026-08-15) — 구글 애드센스 신청 필수 요건 중 하나. 실제 수집 항목만 정확히 반영, 향후 광고 쿠키 조항 미리 포함.
 - [x] 헤더 로그인/회원가입 링크 정렬 수정, 사이트 타이틀 "Pickchive"로 변경 (2026-08-15)
 
+2026-08-16 작업:
+- [x] **크론 CPU 시간 제한 문제 발견 및 수정** — 함정 16 참고. 12개 사이트를 한 invocation에 다 돌리다 매번 clien 직후 강제 종료되어 나머지 사이트가 몇 시간씩 갱신이 끊기고 있었음. 1개씩 처리 + D1 커서 + 1분 오프셋 크론 5개로 해결(전체 주기 60분 → 12분).
+- [x] **`/status` 크롤 진단 대시보드 대폭 강화** — 함정 17·18 참고. `cron_batches` 테이블(2단계 기록)로 "크론이 멈췄는지 vs 중간에 죽었는지" 구분, 최근 수집 시도 시간순 로그(전 경로 통합, 시:분:초 + 에러 메시지) 추가.
+- [x] **오늘의유머 실패 원인 규명 — 해외 IP 403 차단** — 함정 11-1 참고. 기존 "서버 비결정성" 진단이 틀렸음을 확인하고, 실패 로그에 실행 콜로를 남겨 `[colo=CDG status=403]`로 확정. 맥미니 수집으로 전환(`scripts/crawl_todayhumor_home.mjs`).
+- [x] **펨코 중복 수집 경로 제거** — 함정 6-1 참고. GitHub Actions Playwright 경로가 100% 실패하면서 맥미니 성공 기록과 뒤섞여 진단을 방해하던 것을 제거.
+- [x] **사이트 필터 다중 선택** — 전체/개별 토글, 마지막 해제 시 전체 복귀. `getRankedPosts`의 site 필터를 `IN (...)`으로 변경.
+- [x] **로그인 사용자 필터 기억** — `users.last_window/last_sort/last_site`. 필터 없이 홈 진입 시 마지막 필터 복원. "전체/기본값" 클릭이 이 복원 로직에 가로채이던 버그는 `reset=1` 마커로 해결.
+- [x] **댓글 배지 `[원본 댓글 N]` → `(N)`** — 제목 끝에 이미 같은 숫자가 있으면 배지 숨김.
+- [x] **네이버 서치어드바이저 소유 확인** + `site.url`을 커스텀 도메인으로 정정(sitemap/canonical이 옛 workers.dev를 가리키던 문제).
+
 ## 할 일 / 열린 질문
 
 - [ ] **뽐뿌/다모앙 인기글 소스 전환 미완료** — 뽐뿌 `/hot.php`(사이트 전체 HOT, 컬럼 재사용이라 파서 재작성 필요), 다모앙 `/empathy`(공감글, 페이지 구조 파악은 끝났고 파서 미작성).
 - [ ] **이토랜드/엠팍/82cook/인벤 인기글 소스 없음/보류** — 이토랜드 `/hit/list`는 핫딜(쇼핑 광고) 글이 섞여서 필터링 필요, 엠팍은 대안 자체를 못 찾음(기존 파싱 불안정 문제까지 있어 우선순위 낮음), 82cook은 애초에 추천/베스트 개념이 없는 사이트, 인벤은 현재(오픈이슈갤러리)도 어느 정도 큐레이션된 편이라 보류.
 - [ ] **"종합" 정렬이 추천수 없는 사이트(82cook)에 불리한지 검증 필요** — `조회수 + 추천수×10` 공식상 recommend_count가 항상 0인 사이트는 view_count만으로 경쟁하게 되어 실제로 밀리는지 데이터로 확인 필요.
 - [ ] **mlbpark 추천수 셀렉터 미확인** — 정상 응답을 받을 때의 실HTML을 확보해 클래스명 특정 필요.
-- [ ] **오늘의유머 서버 비결정성 근본 원인 미확인** — 재시도 늘려서 완화만 한 상태, 원인 자체는 모름.
+- [x] ~~**오늘의유머 서버 비결정성 근본 원인 미확인**~~ — **2026-08-16 해결.** 비결정성이 아니라 해외 IP 403 차단이었고(콜로마다 결과가 갈렸던 것), 맥미니 수집으로 전환해 해소. 함정 11-1 참고.
+- [ ] **맥미니가 단일 장애점(SPOF)** — 펨코·오늘의유머 두 사이트가 맥미니 한 대의 launchd에만 의존한다. 맥미니가 꺼지거나 홈 IP가 차단되면(펨코는 실제로 몇 시간씩 HTTP 430으로 막힌 전력 있음) 대체 경로가 없다. 무료 대안으로 검토해볼 만한 것: 한국 리전 무료 티어 VM(오라클 클라우드 등)에 같은 스크립트를 이중화, 또는 맥미니 다운 감지 시 알림.
+- [ ] **`/status`가 공개 페이지** — 크롤 실패 이유·콜로·에러 메시지가 그대로 노출된다. 운영 정보라 인증을 걸지, 아니면 이대로 둘지 결정 필요.
 - [ ] **구글 애드센스 신청** — 개인정보처리방침은 완료. 애널리틱스 연동해서 실제 트래픽 확인 후 신청 검토 (사이트가 본문 없이 제목+링크만 있는 어그리게이터 구조라 콘텐츠 정책에 걸릴 수 있음도 염두에 둘 것).
 - [ ] **인라인 댓글(펼쳐보기)** — 지금은 "댓글 보기" 누르면 `/p/[id]`로 이동. 목록에서 아코디언으로 바로 보고 쓰는 UX 아이디어 논의만 함(2026-08-15), 미착수. SSR용(PostRow.astro)/클라이언트 렌더링용(index.astro 무한스크롤·검색) 두 군데 다 손대야 함.
 - [ ] **git identity 설정** — `git config user.name/email` 필요시 설정.
