@@ -5,6 +5,11 @@ import {
   cleanupOldData,
   recordCrawlRun,
   getCrawlHealth,
+  getCronCursor,
+  setCronCursor,
+  startCronBatch,
+  finishCronBatch,
+  getRecentCronBatches,
 } from "./db";
 import { fetchClien } from "./parsers/clien";
 import { fetchPpomppu } from "./parsers/ppomppu";
@@ -117,18 +122,68 @@ export default {
   //  GitHub Actions 쪽은 외부(GitHub 러너)에서 직접 curl하는 거라 이 제약을
   //  안 받아서 그동안 정상 동작해온 것. 그래서 subrequest 없이 같은
   //  invocation 안에서 crawlSite를 직접 호출하는 방식으로 바꿨다.)
+  //
+  // (2026-08-16 확인: 그런데 12개를 전부 한 invocation 안에서 돌리면 Cloudflare
+  //  Workers CPU 시간 제한에 걸린다 — wrangler tail로 "Exceeded CPU Limit"을
+  //  직접 확인했고, 매번 배열 첫 번째인 clien만 성공하고 그 뒤로는 통째로
+  //  강제 종료돼서 나머지 사이트들이 한 시간 가까이 갱신이 끊겼다. CPU 시간
+  //  제한은 catch로 못 잡는 강제 종료라 사이트별 타임아웃 가드로도 못 막는다.
+  //  그래서 한 번의 실행에서는 몇 개만 처리하고 D1에 저장해둔 커서로 다음
+  //  실행에 이어가는 방식으로 바꿨다 — 12개를 5분 안에 다 못 돌지만, 사이트당
+  //  CPU 사용량이 매번 작게 고정되어 절대 중간에 죽지 않는다.)
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     console.log(`Scheduled event triggered: ${event.cron}`);
     ctx.waitUntil(
       (async () => {
-        for (const slug of HTTP_CRAWL_SITES) {
-          try {
-            await CRAWL_FETCHERS[slug](env.DB);
-            console.log(`[cron] ${slug} -> ok`);
-          } catch (err: any) {
-            console.log(`[cron] ${slug} -> error ${err?.message ?? err}`);
-          }
+        // 3개씩도 매번 안 끝나고 죽는 걸 확인해서(cron_batches에 finished_at
+        // null만 계속 쌓임, 2026-08-16) 예전에 확실히 성공했던 단위인 1개로
+        // 더 낮췄다. 12개를 다 도는 데 60분이 걸리지만, GitHub Actions가
+        // 그 사이 별도 경로(사이트당 개별 HTTP 요청이라 CPU 누적이 안 됨)로
+        // 더 자주 커버해준다.
+        const BATCH_SIZE = 1;
+        const PER_SITE_TIMEOUT_MS = 15000;
+        const startedAt = Date.now();
+
+        const cursor = await getCronCursor(env.DB);
+        const batch: string[] = [];
+        for (let i = 0; i < BATCH_SIZE; i++) {
+          batch.push(HTTP_CRAWL_SITES[(cursor + i) % HTTP_CRAWL_SITES.length]);
         }
+        const nextCursor = (cursor + BATCH_SIZE) % HTTP_CRAWL_SITES.length;
+
+        const batchId = await startCronBatch(env.DB, batch);
+        let sitesOk = 0;
+        let batchError: string | undefined;
+        try {
+          for (const slug of batch) {
+            try {
+              await Promise.race([
+                CRAWL_FETCHERS[slug](env.DB),
+                new Promise((_, reject) =>
+                  setTimeout(
+                    () => reject(new Error(`timeout after ${PER_SITE_TIMEOUT_MS}ms`)),
+                    PER_SITE_TIMEOUT_MS
+                  )
+                ),
+              ]);
+              sitesOk++;
+              console.log(`[cron] ${slug} -> ok (+${Date.now() - startedAt}ms)`);
+            } catch (err: any) {
+              console.log(
+                `[cron] ${slug} -> error ${err?.message ?? err} (+${Date.now() - startedAt}ms)`
+              );
+            }
+          }
+          // 커서는 이번 배치를 다 시도한 뒤에만 넘긴다 — 중간에 강제 종료되면
+          // 커서가 그대로 남아 다음 실행이 같은 배치를 재시도한다.
+          await setCronCursor(env.DB, nextCursor);
+        } catch (err: any) {
+          batchError = err?.message ?? String(err);
+        }
+        await finishCronBatch(env.DB, batchId, sitesOk, batchError);
+        console.log(
+          `[cron] batch [${batch.join(",")}] done in ${Date.now() - startedAt}ms, ok=${sitesOk}/${batch.length}`
+        );
       })()
     );
   },
@@ -183,8 +238,14 @@ export default {
       const stale = (rows as any[]).filter(
         r => r.mins_since_ok === null || r.mins_since_ok > 60
       );
+      const cronBatches = await getRecentCronBatches(env.DB);
       return Response.json(
-        { ok: stale.length === 0, staleSites: stale.map(r => r.slug), sites: rows },
+        {
+          ok: stale.length === 0,
+          staleSites: stale.map(r => r.slug),
+          sites: rows,
+          cronBatches,
+        },
         { status: stale.length === 0 ? 200 : 503 }
       );
     }

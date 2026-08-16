@@ -140,7 +140,11 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-const RETRY_ATTEMPTS = 8;
+// 8회(최대 백오프 합 ~19.6초)로 뒀더니 scheduled()의 사이트별 처리 시간이 늘어나
+// 다른 사이트들이 밀리는 문제와 시점이 겹쳤다(2026-08-16). scheduled() 쪽에
+// 사이트당 15초 타임아웃을 따로 걸었지만, 그 한도 안에 여유 있게 들어오도록
+// 5회(최대 백오프 합 ~7초)로 낮춘다.
+const RETRY_ATTEMPTS = 5;
 
 // 게시판 하나씩 완전히 독립적으로 재시도한다. 예전엔 crawlSite의 공용 재시도
 // 루프가 fetchTodayhumor() 전체(두 게시판 다)를 한 단위로 재시도해서, humorbest만

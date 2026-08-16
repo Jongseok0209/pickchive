@@ -119,6 +119,81 @@ export async function recordCrawlRun(
   }
 }
 
+/** 한 번의 scheduled() 실행에서 어느 사이트부터 처리할지 가리키는 커서.
+ * 12개를 한 번에 다 돌리면 CPU 시간 제한에 걸려 매번 clien 직후 강제
+ * 종료됐다(2026-08-16 확인) — 실행마다 일부만 처리하고 커서를 이어간다. */
+export async function getCronCursor(db: D1Database): Promise<number> {
+  const row = await db
+    .prepare(`SELECT next_index FROM cron_cursor WHERE id = 1`)
+    .first<{ next_index: number }>();
+  return row?.next_index ?? 0;
+}
+
+export async function setCronCursor(
+  db: D1Database,
+  nextIndex: number
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO cron_cursor (id, next_index) VALUES (1, ?)
+       ON CONFLICT (id) DO UPDATE SET next_index = excluded.next_index`
+    )
+    .bind(nextIndex)
+    .run();
+}
+
+// 시작 시점에 먼저 기록해두고 끝나면 업데이트하는 2단계 방식. CPU 시간 제한처럼
+// JS 예외로 안 잡히는 강제 종료가 나도 "시작은 했는데 안 끝난" 행이 그대로
+// 남아서, /status에서 "배치가 도중에 죽었다"를 바로 알아볼 수 있다.
+export async function startCronBatch(
+  db: D1Database,
+  sites: string[]
+): Promise<number | null> {
+  try {
+    const row = await db
+      .prepare(`INSERT INTO cron_batches (sites) VALUES (?) RETURNING id`)
+      .bind(sites.join(","))
+      .first<{ id: number }>();
+    return row?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function finishCronBatch(
+  db: D1Database,
+  id: number | null,
+  sitesOk: number,
+  error?: string
+): Promise<void> {
+  if (id === null) return;
+  try {
+    await db
+      .prepare(
+        `UPDATE cron_batches SET finished_at = datetime('now'), sites_ok = ?, error = ? WHERE id = ?`
+      )
+      .bind(sitesOk, error ?? null, id)
+      .run();
+  } catch {
+    // 기록 실패가 크롤 자체를 막지 않도록 삼킨다
+  }
+}
+
+/** 최근 크론 배치 실행 이력 (/health, /status 용) */
+export async function getRecentCronBatches(
+  db: D1Database,
+  limit = 10
+): Promise<unknown[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, started_at, finished_at, sites, sites_ok, error
+       FROM cron_batches ORDER BY started_at DESC LIMIT ?`
+    )
+    .bind(limit)
+    .all();
+  return results;
+}
+
 /** 사이트별 최근 크롤 상태 요약 (/health 용) */
 export async function getCrawlHealth(db: D1Database): Promise<unknown[]> {
   const { results } = await db
