@@ -74,6 +74,11 @@ const socialImageURL = new URL(ogImage, Astro.site ?? Astro.url);
         />
       )
     }
+    {
+      site.naverVerification && (
+        <meta name="naver-site-verification" content={site.naverVerification} />
+      )
+    }
 
     <!--
       Inline FOUC-prevention script: sets data-theme on <html> before

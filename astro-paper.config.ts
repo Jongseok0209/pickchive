@@ -2,7 +2,7 @@ import { defineAstroPaperConfig } from "./src/types/config";
 
 export default defineAstroPaperConfig({
   site: {
-    url: "https://pickchive.won0209.workers.dev/",
+    url: "https://pickchive.com/",
     title: "Pickchive",
     description: "여러 커뮤니티의 인기글을 한곳에 모아보는 사이트",
     author: "Pickchive",
@@ -10,6 +10,7 @@ export default defineAstroPaperConfig({
     lang: "ko",
     timezone: "Asia/Seoul",
     dir: "ltr",
+    naverVerification: "a472a80d4ba06ea959379649a94742cc363ee211",
   },
   features: {
     lightAndDarkMode: true,
