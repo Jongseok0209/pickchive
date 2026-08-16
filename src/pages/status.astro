@@ -2,7 +2,11 @@
 import Layout from "@/layouts/Layout.astro";
 import Header from "@/components/Header.astro";
 import Footer from "@/components/Footer.astro";
-import { getSiteCrawlHealth, type SiteCrawlHealth } from "@/lib/crawlHealth";
+import {
+  getSiteCrawlHealth,
+  getRecentCrawlRuns,
+  type SiteCrawlHealth,
+} from "@/lib/crawlHealth";
 import { getRecentCronBatches, type CronBatch } from "@/lib/cronHealth";
 import { formatElapsedLabel } from "@/lib/format";
 
@@ -17,6 +21,18 @@ const STALE_MINUTES = 15;
 function minutesSince(dateStr: string): number {
   const date = new Date(dateStr.endsWith("Z") ? dateStr : dateStr + "Z");
   return (Date.now() - date.getTime()) / 60000;
+}
+
+const timeFormatter = new Intl.DateTimeFormat("ko-KR", {
+  timeZone: "Asia/Seoul",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+function formatTime(dateStr: string): string {
+  const date = new Date(dateStr.endsWith("Z") ? dateStr : dateStr + "Z");
+  return timeFormatter.format(date);
 }
 
 function classify(site: SiteCrawlHealth): Status {
@@ -68,6 +84,11 @@ const latestBatch: CronBatch | undefined = cronBatches[0];
 const cronNotFiring =
   !latestBatch || minutesSince(latestBatch.startedAt) > CRON_STUCK_MINUTES;
 const cronDied = !!latestBatch && !latestBatch.finishedAt && !cronNotFiring;
+
+// 사이트별 요약/배치 요약만으로는 "몇 시 몇 분에 뭐가 되고 뭐가 안 됐는지"가
+// 안 보인다는 피드백으로 추가 — Cloudflare Cron과 GitHub Actions 몫을 합쳐
+// 실제 시도 순서 그대로 시간순으로 보여준다.
+const recentRuns = await getRecentCrawlRuns(80);
 ---
 
 <Layout title="크롤 상태 | 픽카이브">
@@ -123,6 +144,42 @@ const cronDied = !!latestBatch && !latestBatch.finishedAt && !cronNotFiring;
           </ul>
         )
       }
+    </section>
+
+    <section class="border-border bg-muted/40 mt-4 rounded border p-3">
+      <h2 class="text-sm font-semibold">최근 수집 시도 (시간순)</h2>
+      <p class="text-foreground/50 mt-0.5 text-xs">
+        Cloudflare Cron·GitHub Actions·맥미니 직접 수집 전부 합쳐서 실제
+        시도된 순서 그대로예요.
+      </p>
+      <ul class="mt-2 max-h-[32rem] space-y-1 overflow-y-auto text-xs">
+        {
+          recentRuns.map(r => (
+            <li class="flex flex-wrap items-baseline gap-x-2 py-0.5">
+              <span class="text-foreground/50 shrink-0 font-mono">
+                {formatTime(r.ranAt)}
+              </span>
+              <span class="shrink-0 font-medium">{r.siteName}</span>
+              <span
+                class:list={[
+                  "shrink-0",
+                  r.ok ? "text-green-600" : "text-red-600",
+                ]}
+              >
+                {r.ok ? `성공 ${r.postCount}건` : "실패"}
+              </span>
+              {r.error && (
+                <span class="text-red-600/70 break-words">{r.error}</span>
+              )}
+            </li>
+          ))
+        }
+        {
+          recentRuns.length === 0 && (
+            <li class="text-foreground/50">아직 기록이 없어요.</li>
+          )
+        }
+      </ul>
     </section>
 
     <ul class="mt-4">
