@@ -24,9 +24,8 @@ jobs:
       - name: Crawl inven
         continue-on-error: true
         run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=inven"
-      - name: Crawl todayhumor
-        continue-on-error: true
-        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=todayhumor"
+      # 오늘의유머는 해외 IP를 403으로 차단해서 이 경로로는 성공할 수 없다.
+      # 맥미니(한국 홈 IP) launchd에서만 수집한다 — 상세는 workers/crawler/src/index.ts 주석 참고.
       - name: Crawl ddanzi
         continue-on-error: true
         run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=ddanzi"
