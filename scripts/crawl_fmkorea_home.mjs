@@ -125,7 +125,10 @@ async function run() {
     const res = await fetch(INGEST_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
+      // source를 실어 보내야 /status 타임라인에서 이 맥미니 수집분을 크론·GitHub
+      // Actions 결과와 구분할 수 있다(예전엔 뒤섞여서 펨코가 "됐다 안 됐다"
+      // 하는 것처럼 보였다).
+      body: JSON.stringify({ ...data, source: "macmini" }),
     });
     const text = await res.text();
     console.log(`[fmkorea-home] ${ts} posts=${data.posts.length} ingest="${text}"`);

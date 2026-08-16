@@ -101,18 +101,28 @@ export async function upsertPosts(
   }
 }
 
+// 수집 경로 식별자. 셋 다 같은 테이블에 기록을 남기므로 이걸로 구분한다.
+// (구분이 없어서 펨코 진단이 오래 걸린 전례가 있다 — 0008 마이그레이션 주석 참고)
+export type CrawlSource =
+  | "cron" // Cloudflare Cron (워커 scheduled)
+  | "gha" // GitHub Actions가 /crawl 호출
+  | "gha-playwright" // GitHub Actions Playwright -> /ingest
+  | "macmini" // 맥미니 launchd -> /ingest
+  | "manual"; // 사람이 직접 /crawl 호출
+
 export async function recordCrawlRun(
   db: D1Database,
   slug: string,
   postCount: number,
-  error?: string
+  error?: string,
+  source?: CrawlSource
 ): Promise<void> {
   try {
     await db
       .prepare(
-        `INSERT INTO crawl_runs (slug, post_count, ok, error) VALUES (?, ?, ?, ?)`
+        `INSERT INTO crawl_runs (slug, post_count, ok, error, source) VALUES (?, ?, ?, ?, ?)`
       )
-      .bind(slug, postCount, postCount > 0 ? 1 : 0, error ?? null)
+      .bind(slug, postCount, postCount > 0 ? 1 : 0, error ?? null, source ?? null)
       .run();
   } catch {
     // 기록 실패가 크롤 자체를 막지 않도록 삼킨다

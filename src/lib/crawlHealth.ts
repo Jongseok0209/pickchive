@@ -46,6 +46,7 @@ export interface CrawlRunLogEntry {
   ok: number;
   postCount: number;
   error: string | null;
+  source: string | null;
 }
 
 // 사이트별 요약(getSiteCrawlHealth)만으로는 "몇 시 몇 분에 어느 사이트가
@@ -57,7 +58,7 @@ export async function getRecentCrawlRuns(
 ): Promise<CrawlRunLogEntry[]> {
   const { results } = await env.DB.prepare(
     `SELECT r.slug, s.name as siteName, r.ran_at as ranAt, r.ok,
-            r.post_count as postCount, r.error
+            r.post_count as postCount, r.error, r.source
      FROM crawl_runs r
      JOIN sites s ON s.slug = r.slug
      ORDER BY r.ran_at DESC LIMIT ?`

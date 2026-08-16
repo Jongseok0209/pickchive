@@ -11,39 +11,39 @@ jobs:
     steps:
       - name: Crawl clien
         continue-on-error: true
-        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=clien"
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=clien&src=gha"
       - name: Crawl ppomppu
         continue-on-error: true
-        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=ppomppu"
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=ppomppu&src=gha"
       - name: Crawl bobaedream
         continue-on-error: true
-        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=bobaedream"
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=bobaedream&src=gha"
       - name: Crawl cook82
         continue-on-error: true
-        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=cook82"
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=cook82&src=gha"
       - name: Crawl inven
         continue-on-error: true
-        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=inven"
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=inven&src=gha"
       # 오늘의유머는 해외 IP를 403으로 차단해서 이 경로로는 성공할 수 없다.
       # 맥미니(한국 홈 IP) launchd에서만 수집한다 — 상세는 workers/crawler/src/index.ts 주석 참고.
       - name: Crawl ddanzi
         continue-on-error: true
-        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=ddanzi"
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=ddanzi&src=gha"
       - name: Crawl humoruniv
         continue-on-error: true
-        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=humoruniv"
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=humoruniv&src=gha"
       - name: Crawl etoland
         continue-on-error: true
-        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=etoland"
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=etoland&src=gha"
       - name: Crawl mlbpark
         continue-on-error: true
-        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=mlbpark"
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=mlbpark&src=gha"
       - name: Crawl slrclub
         continue-on-error: true
-        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=slrclub"
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=slrclub&src=gha"
       - name: Crawl damoang
         continue-on-error: true
-        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=damoang"
+        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=damoang&src=gha"
 
       - name: Checkout repository
         uses: actions/checkout@v4

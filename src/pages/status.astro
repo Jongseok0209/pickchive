@@ -101,6 +101,17 @@ const cronDied = !!latestBatch && !latestBatch.finishedAt && !cronNotFiring;
 // 안 보인다는 피드백으로 추가 — Cloudflare Cron과 GitHub Actions 몫을 합쳐
 // 실제 시도 순서 그대로 시간순으로 보여준다.
 const recentRuns = await getRecentCrawlRuns(80);
+
+// 수집 경로가 셋(크론/GitHub Actions/맥미니)이라 같은 사이트라도 어느 경로의
+// 결과인지 구분돼야 한다 — 구분이 없어서 펨코가 "됐다 안 됐다" 하는 것처럼
+// 보였던 전례가 있다(GH Actions는 100% 실패, 맥미니는 성공이었는데 뒤섞임).
+const SOURCE_LABEL: Record<string, string> = {
+  cron: "크론",
+  gha: "GH Actions",
+  "gha-playwright": "GH Playwright",
+  macmini: "맥미니",
+  manual: "수동",
+};
 ---
 
 <Layout title="크롤 상태 | 픽카이브">
@@ -172,6 +183,9 @@ const recentRuns = await getRecentCrawlRuns(80);
                 {formatTime(r.ranAt)}
               </span>
               <span class="shrink-0 font-medium">{r.siteName}</span>
+              <span class="bg-muted text-foreground/60 shrink-0 rounded px-1 py-0.5 text-[10px]">
+                {r.source ? (SOURCE_LABEL[r.source] ?? r.source) : "출처 미상"}
+              </span>
               <span
                 class:list={[
                   "shrink-0",

@@ -241,7 +241,9 @@ async function ingest(data: { slug: string; posts: unknown[]; error?: string }) 
   const res = await fetch(INGEST_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
+    // source로 이 Playwright 경로를 구분한다 — 같은 사이트를 여러 경로가 수집할 때
+    // /status 타임라인에서 어느 쪽 결과인지 알 수 있어야 한다.
+    body: JSON.stringify({ ...data, source: "gha-playwright" }),
   });
   console.log(`[${data.slug}] Ingest response:`, await res.text());
 }

@@ -10,6 +10,7 @@ import {
   startCronBatch,
   finishCronBatch,
   getRecentCronBatches,
+  type CrawlSource,
 } from "./db";
 import { fetchClien } from "./parsers/clien";
 import { fetchPpomppu } from "./parsers/ppomppu";
@@ -36,7 +37,8 @@ async function crawlSite(
   db: Env["DB"],
   slug: string,
   fetcher: () => Promise<Awaited<ReturnType<typeof fetchClien>>>,
-  attempts: number = CRAWL_ATTEMPTS
+  attempts: number = CRAWL_ATTEMPTS,
+  source: CrawlSource = "manual"
 ) {
   const siteId = await getSiteId(db, slug);
   let posts: Awaited<ReturnType<typeof fetchClien>> = [];
@@ -70,7 +72,7 @@ async function crawlSite(
   if (posts.length > 0) {
     await upsertPosts(db, siteId, posts as any);
   }
-  await recordCrawlRun(db, slug, posts.length, lastError);
+  await recordCrawlRun(db, slug, posts.length, lastError, source);
   console.log(
     `[${slug}] crawled ${posts.length} posts${lastError ? ` (error: ${lastError})` : ""}`
   );
@@ -104,25 +106,28 @@ const HTTP_CRAWL_SITES = [
 ];
 
 // scheduled()와 /crawl 라우트가 같이 쓰는 사이트별 크롤 함수 목록.
-const CRAWL_FETCHERS: Record<string, (db: Env["DB"]) => Promise<void>> = {
-  clien: db => crawlSite(db, "clien", fetchClien),
-  ppomppu: db => crawlSite(db, "ppomppu", fetchPpomppu),
-  bobaedream: db => crawlSite(db, "bobaedream", fetchBobaedream),
-  cook82: db => crawlSite(db, "cook82", fetchCook82),
-  inven: db => crawlSite(db, "inven", fetchInven),
+const CRAWL_FETCHERS: Record<
+  string,
+  (db: Env["DB"], source: CrawlSource) => Promise<void>
+> = {
+  clien: (db, src) => crawlSite(db, "clien", fetchClien, undefined, src),
+  ppomppu: (db, src) => crawlSite(db, "ppomppu", fetchPpomppu, undefined, src),
+  bobaedream: (db, src) => crawlSite(db, "bobaedream", fetchBobaedream, undefined, src),
+  cook82: (db, src) => crawlSite(db, "cook82", fetchCook82, undefined, src),
+  inven: (db, src) => crawlSite(db, "inven", fetchInven, undefined, src),
   // 오늘의유머는 차단이 아니라 같은 요청도 서버가 비결정적으로 빈 목록/정상
   // 목록을 섞어서 준다(2026-08-14 확인). fetchTodayhumor 안에서 bestofbest/
   // humorbest 게시판마다 독립적으로 재시도(각 8회)하도록 옮겼으니, 여기 바깥
   // crawlSite 재시도는 곱연산으로 시간만 늘리는 셈이라 1회(재시도 없음)로 둔다.
-  todayhumor: db => crawlSite(db, "todayhumor", fetchTodayhumor, 1),
-  ddanzi: db => crawlSite(db, "ddanzi", fetchDdanzi),
-  humoruniv: db => crawlSite(db, "humoruniv", fetchHumoruniv),
-  etoland: db => crawlSite(db, "etoland", fetchEtoland),
-  mlbpark: db => crawlSite(db, "mlbpark", fetchMlbpark),
-  slrclub: db => crawlSite(db, "slrclub", fetchSlrclub),
-  fmkorea: db => crawlSite(db, "fmkorea", fetchFmkorea),
-  damoang: db => crawlSite(db, "damoang", fetchDamoang),
-  ruliweb: db => crawlSite(db, "ruliweb", fetchRuliweb),
+  todayhumor: (db, src) => crawlSite(db, "todayhumor", fetchTodayhumor, 1, src),
+  ddanzi: (db, src) => crawlSite(db, "ddanzi", fetchDdanzi, undefined, src),
+  humoruniv: (db, src) => crawlSite(db, "humoruniv", fetchHumoruniv, undefined, src),
+  etoland: (db, src) => crawlSite(db, "etoland", fetchEtoland, undefined, src),
+  mlbpark: (db, src) => crawlSite(db, "mlbpark", fetchMlbpark, undefined, src),
+  slrclub: (db, src) => crawlSite(db, "slrclub", fetchSlrclub, undefined, src),
+  fmkorea: (db, src) => crawlSite(db, "fmkorea", fetchFmkorea, undefined, src),
+  damoang: (db, src) => crawlSite(db, "damoang", fetchDamoang, undefined, src),
+  ruliweb: (db, src) => crawlSite(db, "ruliweb", fetchRuliweb, undefined, src),
 };
 
 export default {
@@ -175,7 +180,7 @@ export default {
           for (const slug of batch) {
             try {
               await Promise.race([
-                CRAWL_FETCHERS[slug](env.DB),
+                CRAWL_FETCHERS[slug](env.DB, "cron"),
                 new Promise((_, reject) =>
                   setTimeout(
                     () => reject(new Error(`timeout after ${PER_SITE_TIMEOUT_MS}ms`)),
@@ -216,10 +221,14 @@ export default {
           { status: 400 }
         );
       }
+      // 이 라우트는 GitHub Actions와 사람이 같이 쓴다. 워크플로가 ?src=gha를
+      // 붙여 보내므로 그걸로 구분하고, 없으면 수동 호출로 본다.
+      const src: CrawlSource =
+        url.searchParams.get("src") === "gha" ? "gha" : "manual";
       // 0건 수집이면 crawlSite가 throw한다. 지금까지는 이런 조용한 실패에도
       // 200이 나가서 GitHub Actions가 "성공"으로 넘어가버렸다 — 500으로 알린다.
       try {
-        await CRAWL_FETCHERS[site](env.DB);
+        await CRAWL_FETCHERS[site](env.DB, src);
         return new Response(`Crawled ${site}`, { status: 200 });
       } catch (err: any) {
         return new Response(`Crawl failed: ${err?.message ?? err}`, { status: 500 });
@@ -272,6 +281,7 @@ export default {
           slug: string;
           posts: any[];
           error?: string;
+          source?: CrawlSource;
         };
         if (!body.slug || !Array.isArray(body.posts)) {
           return new Response("Invalid body. Expected { slug, posts: [...] }", { status: 400 });
@@ -288,7 +298,13 @@ export default {
           (body.posts.length === 0
             ? "0건 수집 — 외부 수집기(/ingest)가 빈 목록을 보냄"
             : undefined);
-        await recordCrawlRun(env.DB, body.slug, body.posts.length, ingestError);
+        await recordCrawlRun(
+          env.DB,
+          body.slug,
+          body.posts.length,
+          ingestError,
+          body.source
+        );
         console.log(`[${body.slug}] ingested ${body.posts.length} posts`);
         return new Response(`Ingested ${body.posts.length} posts for ${body.slug}`, { status: 200 });
       } catch (err: any) {
