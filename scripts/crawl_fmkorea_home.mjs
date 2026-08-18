@@ -1,11 +1,45 @@
-// 펨코(에펨코리아)는 데이터센터 IP(Cloudflare Workers, GitHub Actions)를 전부
-// 차단한다(HTTP 430, "에펨코리아 보안 시스템" 페이지 — JS 챌린지가 아니라 순수
-// IP 평판 차단이라 Playwright로도 못 뚫음, 2026-08-14 확인). 반대로 가정용 IP는
-// 안 막혀 있어서, 늘 켜져 있는 이 맥미니에서 launchd로 5분마다 직접 수집해
-// 크롤러 워커의 /ingest로 보낸다. 헤드리스 브라우저 없이 그냥 fetch로 충분함
-// (JS 실행이 필요한 페이지가 아니라 서버에서 완성된 HTML을 그대로 줌).
+// 펨코(에펨코리아) 수집 — 맥미니 launchd 전용.
+//
+// 두 겹의 방어가 걸려 있다.
+//  1. 데이터센터 IP(Cloudflare Workers, GitHub Actions) 차단 — 그래서 한국 가정용
+//     IP인 이 맥미니에서만 수집한다.
+//  2. JS + WebAssembly DDoS 챌린지 — HTTP 430 "에펨코리아 보안 시스템" 페이지를
+//     주고, 인라인 JS가 lite_year 쿠키를 심은 뒤 /mc/mc.php 의 WASM 모듈이
+//     fm5()를 실행해 진짜 통과 쿠키를 만든다(WASM 안에서 document.cookie를
+//     직접 건드린다). **plain fetch로는 이 쿠키를 절대 만들 수 없다.**
+//
+// 2026-08-18 이전 버전은 2번을 "순수 IP 평판 차단이라 Playwright로도 못 뚫음"으로
+// 잘못 진단해서, 챌린지를 풀지 못한 채 5분마다 그냥 재요청만 반복했다. 그 결과
+// 24시간 275회 전부 실패했을 뿐 아니라 "챌린지를 한 번도 통과하지 않는 클라이언트"로
+// 찍혀서 HTTP 429 "[보안 시스템에 의한 자동 차단]"까지 올라갔다. 응답 헤더의
+// retry-after 가 정확히 300초인데 launchd 주기도 300초라, 매 요청이 차단 해제
+// 시점을 칼같이 노리는 꼴이라 더 봇처럼 보였다.
+//
+// 지금 방식: **쿠키는 브라우저로 한 번만 따고, 그 다음엔 plain fetch로 싸게 쓴다.**
+//  - 저장된 쿠키로 plain fetch 시도 (평소 경로, 브라우저 안 띄움)
+//  - 챌린지에 걸리면 그때만 Playwright 헤드리스로 챌린지를 풀고 쿠키를 갱신한 뒤 재시도
+//  - 실측(2026-08-18): 챌린지 통과 후 PHPSESSID + idntm5 만으로 plain fetch가 HTTP 200
+//
+// 파서는 워커 쪽(HTMLRewriter)과 별개 구현이다 — 파서 고칠 땐 양쪽 다 손볼 것.
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import { homedir } from "node:os";
+
 const LIST_URL = "https://www.fmkorea.com/best?listStyle=list";
 const INGEST_URL = "https://pickchive-crawler.won0209.workers.dev/ingest";
+const COOKIE_FILE = `${homedir()}/Library/Application Support/pickchive/fmkorea-cookies.txt`;
+const UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36";
+// 챌린지 통과에 실제로 필요한 쿠키만 보관한다. 광고/분석 쿠키(_ga, __gads 등)까지
+// 싣고 다니면 헤더만 커지고 얻는 게 없다.
+const KEEP_COOKIES = [
+  "PHPSESSID",
+  "idntm5",
+  "fm5",
+  "fm6",
+  "lite_year",
+  "g_lite_year",
+];
 
 // 조회수는 "5만"처럼 만 단위로 축약해서 나온다. 그냥 숫자만 남기면
 // "5만" -> 5로 잘못 읽혀서(실제 50000) 조회수가 추천수보다 훨씬 작게
@@ -32,18 +66,32 @@ function decodeEntities(s) {
     .replace(/&#0*39;/g, "'");
 }
 
-// User-Agent 하나만 보내던 걸 실제 브라우저가 보내는 헤더 세트에 가깝게
-// 보강했다(Accept/Accept-Language/Referer/sec-fetch-* 등). 매번 완전히
-// 새 연결로 요청 하나만 보내는 것도 봇처럼 보일 수 있어서, 응답의
-// Set-Cookie를 다음 요청에 그대로 실어 보내 세션이 이어지는 것처럼
-// 흉내낸다(2026-08-16, 홈 IP도 몇 시간씩 HTTP 430으로 막히는 문제 대응).
-let cookieJar = "";
+function loadCookies() {
+  try {
+    return readFileSync(COOKIE_FILE, "utf8").trim();
+  } catch {
+    return "";
+  }
+}
 
-async function crawlFmkorea() {
+function saveCookies(header) {
+  mkdirSync(dirname(COOKIE_FILE), { recursive: true });
+  writeFileSync(COOKIE_FILE, header);
+}
+
+// 챌린지 페이지인지 판별. 430(챌린지)과 429(자동 차단)를 구분해서 남겨야
+// "풀면 되는 상태"인지 "이미 찍혀서 굳은 상태"인지 로그만 보고 알 수 있다.
+function challengeKind(status, html) {
+  if (status === 430) return "challenge";
+  if (status === 429) return "hard-block";
+  if (/에펨코리아 보안 시스템/.test(html)) return "challenge";
+  return null;
+}
+
+async function fetchList(cookieHeader) {
   const res = await fetch(LIST_URL, {
     headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      "User-Agent": UA,
       Accept:
         "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
       "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -52,24 +100,48 @@ async function crawlFmkorea() {
       "Sec-Fetch-Mode": "navigate",
       "Sec-Fetch-Site": "same-origin",
       "Upgrade-Insecure-Requests": "1",
-      ...(cookieJar ? { Cookie: cookieJar } : {}),
+      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
     },
   });
+  return { status: res.status, html: await res.text() };
+}
 
-  const setCookie = res.headers.get("set-cookie");
-  if (setCookie) {
-    cookieJar = setCookie
-      .split(/,(?=[^ ]+=)/)
-      .map(c => c.split(";")[0])
+// Playwright 헤드리스로 챌린지를 실제로 실행시켜 통과 쿠키를 얻는다.
+// 평소엔 호출되지 않으므로 import도 이 안에서 동적으로 한다(브라우저 기동 비용 회피).
+async function solveChallenge() {
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const ctx = await browser.newContext({
+      userAgent: UA,
+      locale: "ko-KR",
+      timezoneId: "Asia/Seoul",
+      viewport: { width: 1440, height: 900 },
+    });
+    const page = await ctx.newPage();
+    await page.goto(LIST_URL, {
+      waitUntil: "domcontentloaded",
+      timeout: 45000,
+    });
+    // WASM이 쿠키를 심고 스스로 리다이렉트할 시간을 준다.
+    await page.waitForTimeout(6000);
+    if (/보안 시스템/.test(await page.title())) {
+      await page.reload({ waitUntil: "domcontentloaded", timeout: 45000 });
+      await page.waitForTimeout(4000);
+    }
+    const solved = !/보안 시스템/.test(await page.title());
+    const header = (await ctx.cookies())
+      .filter(c => KEEP_COOKIES.includes(c.name))
+      .map(c => `${c.name}=${c.value}`)
       .join("; ");
+    if (solved && header) saveCookies(header);
+    return { solved, header };
+  } finally {
+    await browser.close();
   }
+}
 
-  const html = await res.text();
-
-  if (!res.ok) {
-    return { slug: "fmkorea", posts: [], error: `HTTP ${res.status}` };
-  }
-
+function parsePosts(html) {
   const posts = [];
   const rows = html.match(/<tr[^>]*>[\s\S]*?<\/tr>/g) || [];
 
@@ -107,31 +179,74 @@ async function crawlFmkorea() {
       postedAtRaw: timeMatch ? timeMatch[1].trim() : null,
     });
   }
+  return posts;
+}
 
+async function crawlFmkorea() {
+  let solvedThisRun = false;
+  let { status, html } = await fetchList(loadCookies());
+  let kind = challengeKind(status, html);
+
+  // 저장된 쿠키가 만료됐거나 아예 없으면 여기서 걸린다 — 그때만 브라우저를 띄운다.
+  if (kind) {
+    const { solved, header } = await solveChallenge();
+    solvedThisRun = true;
+    if (!solved) {
+      return {
+        slug: "fmkorea",
+        posts: [],
+        error: `challenge unsolved (${kind}, status=${status}) — 브라우저로도 통과 실패`,
+      };
+    }
+    ({ status, html } = await fetchList(header));
+    kind = challengeKind(status, html);
+    if (kind) {
+      return {
+        slug: "fmkorea",
+        posts: [],
+        error: `challenge re-blocked after solve (${kind}, status=${status})`,
+      };
+    }
+  }
+
+  if (status !== 200) {
+    return { slug: "fmkorea", posts: [], error: `HTTP ${status}` };
+  }
+
+  const posts = parsePosts(html);
   if (posts.length === 0) {
     return {
       slug: "fmkorea",
       posts: [],
-      error: `0 posts after parse. status=${res.status} len=${html.length}`,
+      error: `0 posts after parse. status=${status} len=${html.length} solvedThisRun=${solvedThisRun}`,
     };
   }
-  return { slug: "fmkorea", posts };
+  return { slug: "fmkorea", posts, solvedThisRun };
 }
 
 async function run() {
+  // launchd 주기(300초)가 펨코 차단의 retry-after(300초)와 정확히 같아서, 매 요청이
+  // 차단 해제 시점을 칼같이 노리는 패턴으로 보였다. 무작위 지연으로 주기를 흐트러뜨린다.
+  if (!process.env.PICKCHIVE_NO_JITTER) {
+    await new Promise(r => setTimeout(r, Math.floor(Math.random() * 90_000)));
+  }
+
   const ts = new Date().toISOString();
   try {
     const data = await crawlFmkorea();
+    const { solvedThisRun, ...payload } = data;
     const res = await fetch(INGEST_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // source를 실어 보내야 /status 타임라인에서 이 맥미니 수집분을 크론·GitHub
       // Actions 결과와 구분할 수 있다(예전엔 뒤섞여서 펨코가 "됐다 안 됐다"
       // 하는 것처럼 보였다).
-      body: JSON.stringify({ ...data, source: "macmini" }),
+      body: JSON.stringify({ ...payload, source: "macmini" }),
     });
     const text = await res.text();
-    console.log(`[fmkorea-home] ${ts} posts=${data.posts.length} ingest="${text}"`);
+    console.log(
+      `[fmkorea-home] ${ts} posts=${data.posts.length}${solvedThisRun ? " (챌린지 재통과)" : ""} ingest="${text}"`
+    );
   } catch (err) {
     console.error(`[fmkorea-home] ${ts} error:`, err?.message ?? err);
   }

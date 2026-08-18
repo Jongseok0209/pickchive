@@ -48,9 +48,24 @@ Astro SSR (pickchive, Workers+Assets) ──────────────
 3. **`cloudflare:workers`의 `env`는 전역 `Env`가 아니라 `Cloudflare.Env` 네임스페이스를 씀.** `src/env.d.ts`에서 `declare namespace Cloudflare { interface Env {...} }`로 확장해야 타입이 잡힘.
 4. **주 스케줄러는 Cloudflare Cron이고, GitHub Actions는 백업이다.** (초기엔 함정 13번 버그 때문에 Cron이 죽은 것처럼 보여 GH Actions가 주도했으나 2026-08-15에 정정됨.) GH Actions의 `schedule`은 5분으로 설정해도 **실측 20~60분 간격으로만 실행된다**(GitHub이 스케줄 이벤트를 지연·병합, 우리가 못 고침). 다만 GH Actions는 사이트마다 개별 HTTP 요청이라 CPU 누적이 없어 한 번에 전 사이트를 돌 수 있다는 장점이 있어 백업으로 유지한다.
 5. **`workers/crawler`에서 `wrangler` 명령 쓸 때 `--config wrangler.jsonc`를 명시해야 한다.** 상위 디렉토리(루트 프로젝트)의 `.wrangler/deploy/config.json`과 충돌 방지.
-6-1. **펨코는 데이터센터 IP를 전부 차단한다 — GitHub Actions뿐 아니라 Cloudflare Workers도, 모바일(m.fmkorea.com)도 동일 (2026-08-15 확정).** `/debug-fetch`로 Workers에서 직접 찔러보면 HTTP 430 + "에펨코리아 보안 시스템" 페이지 — JS 챌린지가 아니라 순수 IP 평판 차단이라 Playwright로도 못 뚫음. RSS/API 우회 경로도 없음(`act=rss`도 그냥 HTML로 리다이렉트). 가정용 IP는 안 막혀 있어서, **상시 켜져 있는 맥미니에서 `scripts/crawl_fmkorea_home.mjs`를 launchd(`~/Library/LaunchAgents/com.pickchive.crawl-fmkorea.plist`, 5분 간격)로 돌려 `/ingest`에 직접 전송하는 방식으로 해결함(2026-08-15).** 헤드리스 브라우저 불필요 — plain fetch로 서버가 완성된 HTML을 그대로 줌. 조회수는 "5만" 같은 만 단위 축약이라 숫자만 남기면 5로 잘못 읽히니 별도 파싱 필요.
+6-1. **펨코는 데이터센터 IP를 전부 차단한다 — GitHub Actions뿐 아니라 Cloudflare Workers도, 모바일(m.fmkorea.com)도 동일 (2026-08-15 확정).** `/debug-fetch`로 Workers에서 직접 찔러보면 HTTP 430 + "에펨코리아 보안 시스템" 페이지. **(2026-08-18 정정: 이걸 "순수 IP 평판 차단이라 Playwright로도 못 뚫음"으로 적어뒀던 건 틀렸다 — 실제로는 JS+WASM 챌린지이고 헤드리스 브라우저로 통과된다. 함정 6-2 참고.)** RSS/API 우회 경로도 없음(`act=rss`도 그냥 HTML로 리다이렉트). 가정용 IP는 안 막혀 있어서, **상시 켜져 있는 맥미니에서 `scripts/crawl_fmkorea_home.mjs`를 launchd(`~/Library/LaunchAgents/com.pickchive.crawl-fmkorea.plist`, 5분 간격)로 돌려 `/ingest`에 직접 전송하는 방식으로 해결함(2026-08-15).** 헤드리스 브라우저 불필요 — plain fetch로 서버가 완성된 HTML을 그대로 줌. 조회수는 "5만" 같은 만 단위 축약이라 숫자만 남기면 5로 잘못 읽히니 별도 파싱 필요.
 
     **(2026-08-16 추가) 펨코를 GitHub Actions Playwright 경로에서도 완전히 제거했다.** 러너가 데이터센터 IP라 100% 차단되는데(24시간 50회 시도 전부 실패, 성공 0회), 이 실패 기록이 맥미니(홈 IP) 성공 기록과 같은 `crawl_runs`에 뒤섞이면서 **펨코가 "됐다 안 됐다" 하는 것처럼 보이게 만들어 원인 파악을 크게 방해했다.** 실패 메시지로 두 경로를 구분할 수 있다 — 맥미니는 `HTTP 430`, GH Actions Playwright는 `0 posts after retries. url=...listStyle=list title=에펨코리아 보안 시스템`. **성공할 수 없는 수집 경로는 남겨두지 말 것 — 노이즈가 진짜 문제를 가린다.**
+6-2. **(2026-08-18 정정) 펨코의 430은 "순수 IP 평판 차단"이 아니라 JS + WebAssembly DDoS 챌린지다 — 6-1의 "Playwright로도 못 뚫음"은 틀린 진단이었다.** 차단 페이지 HTML을 실제로 열어보니 `"잠시 기다리면 사이트에 자동으로 접속됩니다"` + `<noscript>자바스크립트를 켜시길 바랍니다</noscript>` 였다. 동작 방식:
+
+    1. HTTP 430 + `retry-after: 300` 으로 챌린지 페이지를 준다
+    2. 인라인 JS가 `lite_year` / `g_lite_year` 쿠키를 심는다
+    3. `<script type="module">`이 `/mc/mc.php`(WASM 글루, 실제 바이너리는 `/mc/mcw.php`)를 불러 `fm5(token, md5)`를 실행 — **이 WASM이 `document.cookie`를 직접 건드려 진짜 통과 쿠키를 만든다**(글루 코드의 `__wbg_setcookie` import가 증거)
+    4. `?ddosCheckOnly=1` 붙여 리다이렉트
+
+    **plain fetch로는 3번을 절대 재현할 수 없다.** 반대로 헤드리스 Chromium은 그냥 통과한다 — 실측으로 430 → 6초 후 "포텐 터짐 최신순", 21행 파싱 확인.
+
+    **더 중요한 건, 못 푸는 채로 계속 두드리면 상태가 악화된다는 점이다.** 챌린지를 한 번도 통과 못 하는 클라이언트가 5분마다 계속 오니까 HTTP 429 `[보안 시스템에 의한 자동 차단]`(차단 종류 `D C`)으로 승격됐다. 그 429 페이지는 `국가: KR / 접속 종류: 유선 / 통신사: SK Broadband`까지 정확히 찍어준다 — **한국 가정용 IP인 걸 알면서 막은 것이므로 지리/IP 평판 문제가 아니라는 결정적 증거다.** 게다가 `retry-after`가 300초인데 launchd 주기도 정확히 300초라, 매 요청이 차단 해제 시점을 칼같이 노리는 패턴으로 보였다.
+
+    **해결(`scripts/crawl_fmkorea_home.mjs`)**: 쿠키는 브라우저로 한 번만 따고 그 다음엔 plain fetch로 싸게 쓴다. 저장된 쿠키로 plain fetch → 챌린지에 걸릴 때만 Playwright 헤드리스로 풀고 쿠키 갱신 후 재시도 → 쿠키는 `~/Library/Application Support/pickchive/fmkorea-cookies.txt`에 보관. 챌린지 통과 후엔 `PHPSESSID` + `idntm5` 만으로 plain fetch가 200이다(실측). launchd 주기와 retry-after가 겹치지 않도록 스크립트 시작에 0~90초 무작위 지연도 넣었다.
+
+    **교훈: "차단당했다"고 판단하기 전에 차단 페이지 HTML을 끝까지 읽어라.** 6-1은 상태코드(430)와 제목("에펨코리아 보안 시스템")만 보고 IP 차단으로 단정했는데, 같은 페이지 아래쪽에 "자바스크립트를 켜라"와 WASM import가 그대로 적혀 있었다. 그 한 번의 오진 때문에 "못 뚫는다"고 기록이 굳었고, 이후 넉 달 가까이 아무도 다시 확인하지 않았다.
+
 6. **펨코와 루리웹은 WAF(Cloudflare Turnstile/522 차단)로 인해 Worker 아웃바운드가 막힘.** GitHub Actions 내 Playwright 브라우저로 DOM 수집 후 `/ingest` API로 전달하는 방식으로 해결. 다모앙도 동일 — `/free` HTML 목록이 Cloudflare Turnstile로 막혀있어 일반 `fetch()`로는 우회 불가하지만 헤드리스 브라우저는 통과함(2026-08-14 확인).
 7. **저작권 원칙: 본문/이미지 전체를 절대 가져오지 않는다.** 제목·링크·작성자·조회수·추천수·댓글수·시간 메타데이터만 저장하고 원문은 외부 링크로 연결.
 8. **D1 SQL Variable 수 제한 (최대 100개 이하).** 140+ 개 이상의 포스트 업서트 시 40개 단위 `chunkArray`로 청킹하여 실행해야 에러 방지됨 (`workers/crawler/src/db.ts`).
@@ -161,6 +176,7 @@ Astro SSR (pickchive, Workers+Assets) ──────────────
 
 2026-08-18 작업:
 - [x] **AI 크롤러 폭주로 Workers 일일 한도 초과 → 사이트 다운(에러 1027) 대응** — 함정 20 참고. robots.txt 전면 재작성(AI 크롤러 25종 + SEO 봇 11종 차단, 전체 봇 대상 `Disallow: /*?`), 홈 필터 링크 전부 `rel="nofollow"`, 쿼리 붙은 홈 `noindex, follow`. **Cloudflare WAF 차단은 미적용 — 대시보드 작업 필요(권한 없음).**
+- [x] **펨코 25시간 중단 원인 규명 및 복구** — 함정 6-2 참고. 430이 IP 차단이 아니라 JS+WASM 챌린지였고, 못 푼 채 5분마다 두드리다 429 자동 차단까지 승격됐던 것. 쿠키 1회 취득 후 재사용 방식으로 재작성, 20건 수집 복구 확인.
 
 ## 할 일 / 열린 질문
 
@@ -175,5 +191,5 @@ Astro SSR (pickchive, Workers+Assets) ──────────────
 - [ ] **인라인 댓글(펼쳐보기)** — 지금은 "댓글 보기" 누르면 `/p/[id]`로 이동. 목록에서 아코디언으로 바로 보고 쓰는 UX 아이디어 논의만 함(2026-08-15), 미착수. SSR용(PostRow.astro)/클라이언트 렌더링용(index.astro 무한스크롤·검색) 두 군데 다 손대야 함.
 - [ ] **git identity 설정** — `git config user.name/email` 필요시 설정.
 - [ ] **Cloudflare WAF AI 봇 차단 미적용** — 함정 20. robots.txt/nofollow는 코드로 넣었지만 규칙을 무시하는 봇은 그대로 들어오고, 지키는 봇도 반영까지 시간이 걸린다. Security → Bots → "Block AI Scrapers and Crawlers" 토글 + WAF Custom rule이 필요한데 wrangler 토큰 권한 밖이라 대시보드에서 직접 해야 한다. **이거 켜기 전까지 한도 재초과 위험은 그대로다.**
-- [ ] **펨코 맥미니 홈 IP까지 차단됨** — 2026-08-18 확인, 마지막 성공 약 25시간 전, 24시간 275회 전부 `HTTP 430`. 함정 6-1의 "홈 IP는 안 막혀 있다"는 전제가 깨진 상태. 일시적인지 영구인지 관찰 필요.
+- [x] ~~**펨코 맥미니 홈 IP까지 차단됨**~~ — **2026-08-18 해결.** 홈 IP 차단이 아니라 JS+WASM 챌린지를 못 푼 것이었고, 못 푸는 채로 계속 두드려서 429 자동 차단까지 올라갔던 것. 함정 6-2 참고.
 - [ ] **SLR클럽 원본 521** — 2026-08-18 확인, 마지막 성공 약 10시간 전, 24시간 116회 실패, `status=521 colo=CDG`. 해외 콜로에서 원본 서버 연결 실패.
