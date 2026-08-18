@@ -93,6 +93,22 @@ Astro SSR (pickchive, Workers+Assets) ──────────────
 
 19. **크롤 실패를 기록할 때는 실패 "이유"를 반드시 남길 것.** 오늘의유머가 오래 미궁이었던 이유 중 하나가, 빈 목록을 받는 경우엔 예외가 발생하지 않아 `crawl_runs.error`가 `null`로 남아서 `/status`에 아무 이유도 안 뜬 것이었다(펨코는 HTTP 430 같은 명시적 에러라 메시지가 남는 것과 대조적). 빈 결과도 명시적으로 `throw`해서 이유를 남기고, **가능하면 실행 환경 정보(콜로/상태코드)까지 함께 기록할 것** — 11-1번 원인을 찾아낸 게 정확히 이것이다.
 
+20. **Cloudflare Workers 무료 플랜의 일일 요청 한도(10만/일)는 계정 전체 합산이고, 넘기면 사이트가 통째로 에러 1027로 내려간다 (2026-08-17 실제 발생).** 범인은 사람 트래픽이 아니라 **AI 학습 크롤러**였다 — 12시간 동안 홈(`/`)에만 `meta-externalagent`(Meta AI) 77,051회 + `GPTBot`(OpenAI) 35,798회. 하루 총 `pickchive` 워커 148,137 요청(크롤러 워커는 2,480으로 결백).
+
+    **왜 홈만 맞았나**: 홈의 필터 링크가 전부 서버 렌더링 `<a href>`인데 **기간(7) × 정렬(4) × 사이트(14개 다중선택 토글)** 조합이라 크롤러 입장에선 URL 공간이 사실상 무한하다. 전부 `prerender: false`라 한 번 한 번이 Worker 요청 + D1 쿼리이고 캐시도 안 탄다(`cacheStatus: none`).
+
+    **연쇄 피해**: 한도가 계정 단위라 `pickchive-crawler`까지 같이 죽어서 GitHub Actions `/crawl`과 맥미니 `/ingest`가 전부 실패했다. **"크롤이 갑자기 전부 실패"할 때 크롤러 자체를 파기 전에 Workers 일일 한도부터 확인할 것.**
+
+    **진단 방법 (재현 가능)** — 대시보드 말고 GraphQL Analytics API가 훨씬 빠르다. wrangler OAuth 토큰(`~/Library/Preferences/.wrangler/config/default.toml`의 `oauth_token`)으로 계정 단위 조회가 된다:
+    - 워커별/시간별 요청 수: `workersInvocationsAdaptive` (account scope, `dimensions{scriptName datetimeHour}`)
+    - 경로·UA·국가별 breakdown: `httpRequestsAdaptiveGroups` (zone scope, zone id는 `/zones?account.id=...`로 조회). **`clientAsn`/`clientIP`는 무료 존에서 권한 없음** — `userAgent`, `clientRequestPath`, `clientCountryName`, `edgeResponseStatus`, `cacheStatus`는 나온다.
+
+    **대응**:
+    - robots.txt에서 AI 학습 크롤러 25종 + SEO 분석 봇 11종 `Disallow: /`, 나머지 전체 봇에 `Disallow: /*?`(쿼리 URL 금지). 필터 링크 전부 `rel="nofollow"`, 쿼리 붙은 홈은 `<meta name="robots" content="noindex, follow">`.
+    - **단, robots.txt만으로는 부족하다 — 봇이 규칙을 지켜서 안 오든 안 지켜서 오든, 일단 온 요청은 이미 Worker 요청으로 카운트된다.** 워커 코드에서 UA 보고 403 던지는 것도 마찬가지로 요청 수를 못 줄인다. **Cloudflare WAF는 Worker보다 먼저 실행돼서 여기서 막힌 요청만 카운트에서 빠진다** — Security → Bots → "Block AI Scrapers and Crawlers"(무료 제공) + WAF Custom rule(무료 5개)이 유일한 실질 방어선이다.
+    - 참고: wrangler OAuth 토큰은 `zone (read)` 권한뿐이라 **WAF 설정은 API로 못 건드린다.** 대시보드에서 직접 하거나 `Zone WAF: Edit` 권한의 API 토큰을 따로 발급해야 한다.
+
+
 ## 현재 상태 (2026-08-16 기준)
 
 완료:
@@ -143,6 +159,9 @@ Astro SSR (pickchive, Workers+Assets) ──────────────
 - [x] **댓글 배지 `[원본 댓글 N]` → `(N)`** — 제목 끝에 이미 같은 숫자가 있으면 배지 숨김.
 - [x] **네이버 서치어드바이저 소유 확인** + `site.url`을 커스텀 도메인으로 정정(sitemap/canonical이 옛 workers.dev를 가리키던 문제).
 
+2026-08-18 작업:
+- [x] **AI 크롤러 폭주로 Workers 일일 한도 초과 → 사이트 다운(에러 1027) 대응** — 함정 20 참고. robots.txt 전면 재작성(AI 크롤러 25종 + SEO 봇 11종 차단, 전체 봇 대상 `Disallow: /*?`), 홈 필터 링크 전부 `rel="nofollow"`, 쿼리 붙은 홈 `noindex, follow`. **Cloudflare WAF 차단은 미적용 — 대시보드 작업 필요(권한 없음).**
+
 ## 할 일 / 열린 질문
 
 - [ ] **뽐뿌/다모앙 인기글 소스 전환 미완료** — 뽐뿌 `/hot.php`(사이트 전체 HOT, 컬럼 재사용이라 파서 재작성 필요), 다모앙 `/empathy`(공감글, 페이지 구조 파악은 끝났고 파서 미작성).
@@ -155,4 +174,6 @@ Astro SSR (pickchive, Workers+Assets) ──────────────
 - [ ] **구글 애드센스 신청** — 개인정보처리방침은 완료. 애널리틱스 연동해서 실제 트래픽 확인 후 신청 검토 (사이트가 본문 없이 제목+링크만 있는 어그리게이터 구조라 콘텐츠 정책에 걸릴 수 있음도 염두에 둘 것).
 - [ ] **인라인 댓글(펼쳐보기)** — 지금은 "댓글 보기" 누르면 `/p/[id]`로 이동. 목록에서 아코디언으로 바로 보고 쓰는 UX 아이디어 논의만 함(2026-08-15), 미착수. SSR용(PostRow.astro)/클라이언트 렌더링용(index.astro 무한스크롤·검색) 두 군데 다 손대야 함.
 - [ ] **git identity 설정** — `git config user.name/email` 필요시 설정.
-
+- [ ] **Cloudflare WAF AI 봇 차단 미적용** — 함정 20. robots.txt/nofollow는 코드로 넣었지만 규칙을 무시하는 봇은 그대로 들어오고, 지키는 봇도 반영까지 시간이 걸린다. Security → Bots → "Block AI Scrapers and Crawlers" 토글 + WAF Custom rule이 필요한데 wrangler 토큰 권한 밖이라 대시보드에서 직접 해야 한다. **이거 켜기 전까지 한도 재초과 위험은 그대로다.**
+- [ ] **펨코 맥미니 홈 IP까지 차단됨** — 2026-08-18 확인, 마지막 성공 약 25시간 전, 24시간 275회 전부 `HTTP 430`. 함정 6-1의 "홈 IP는 안 막혀 있다"는 전제가 깨진 상태. 일시적인지 영구인지 관찰 필요.
+- [ ] **SLR클럽 원본 521** — 2026-08-18 확인, 마지막 성공 약 10시간 전, 24시간 116회 실패, `status=521 colo=CDG`. 해외 콜로에서 원본 서버 연결 실패.

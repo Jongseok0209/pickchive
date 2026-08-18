@@ -10,6 +10,8 @@ type Props = {
   description?: string;
   ogImage?: string;
   canonicalURL?: string;
+  /** 필터 조합처럼 쿼리로만 갈라지는 페이지는 색인에서 빼고 링크만 따라가게 한다. */
+  noindex?: boolean;
 };
 
 const { site } = config;
@@ -19,6 +21,7 @@ const {
   description = site.description,
   ogImage = resolveDefaultOgImagePath(config),
   canonicalURL = new URL(Astro.url.pathname, Astro.site).href,
+  noindex = false,
 } = Astro.props;
 
 const socialImageURL = new URL(ogImage, Astro.site ?? Astro.url);
@@ -36,6 +39,7 @@ const socialImageURL = new URL(ogImage, Astro.site ?? Astro.url);
     <link rel="icon" type="image/svg+xml" href={getAssetPath("favicon.svg")} />
     <link rel="icon" href={getAssetPath("favicon.ico")} />
     <link rel="canonical" href={canonicalURL} />
+    {noindex && <meta name="robots" content="noindex, follow" />}
     <meta name="generator" content={Astro.generator} />
 
     <!-- Primary meta -->
