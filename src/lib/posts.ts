@@ -38,17 +38,24 @@ function hoursForWindow(key: string): number {
 
 export type SortKey = "score" | "views" | "recommend" | "comments";
 
+// 정렬 키가 동점이면 SQLite가 어떤 순서로 줄지 보장하지 않는다. OFFSET 페이지네이션에서
+// 그 묶음이 페이지 경계에 걸치면 같은 글이 두 페이지에 다 실리거나(중복) 어느 쪽에도
+// 안 실린다(누락). 실제로 같은 크롤 배치에 들어온 조회수 0인 글들은 점수와
+// first_seen_at이 완전히 같아서 20개씩 묶음이 생긴다. 마지막에 고유 컬럼인 id를 붙여
+// 순서를 확정한다.
+const TIEBREAK = "p.first_seen_at DESC, p.id DESC";
+
 function orderByClause(sort: SortKey): string {
   switch (sort) {
     case "views":
-      return "p.view_count DESC, p.first_seen_at DESC";
+      return `p.view_count DESC, ${TIEBREAK}`;
     case "recommend":
-      return "p.recommend_count DESC, p.first_seen_at DESC";
+      return `p.recommend_count DESC, ${TIEBREAK}`;
     case "comments":
-      return "COALESCE(p.comment_count, 0) DESC, p.first_seen_at DESC";
+      return `COALESCE(p.comment_count, 0) DESC, ${TIEBREAK}`;
     case "score":
     default:
-      return "(p.view_count + p.recommend_count * 10) DESC, p.first_seen_at DESC";
+      return `(p.view_count + p.recommend_count * 10) DESC, ${TIEBREAK}`;
   }
 }
 

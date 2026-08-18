@@ -506,6 +506,30 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
       return params;
     }
 
+    // 이미 목록에 있는 글은 다시 그리지 않는다.
+    //
+    // OFFSET 페이지네이션인데 정렬 기준이 페이지를 받는 사이에 바뀐다 — 점수
+    // (조회수 + 추천수×10)는 크롤러가 5분마다 갱신하고, 시간 창(`now - N시간`)도
+    // 요청마다 새로 계산된다. 그래서 페이지1 끝자락에 있던 글이 밀려 내려가면
+    // 페이지2 첫머리에 다시 실려 온다. DB에는 행이 하나뿐이고(새로고침하면 하나로
+    // 보인다) 순수하게 그리는 쪽 문제다.
+    //
+    // 주의: 이건 눈에 보이는 중복만 막는다. 반대 방향(순위가 올라가서 두 페이지
+    // 어디에도 안 실리는 글)은 그대로 누락된다. 근본 해결은 커서 페이지네이션이다.
+    function appendPosts(posts: Post[]): void {
+      const seen = new Set(
+        Array.from(list!.querySelectorAll<HTMLElement>("li[data-post-id]")).map(
+          li => li.dataset.postId
+        )
+      );
+      const fresh = posts.filter(p => !seen.has(String(p.id)));
+      if (!fresh.length) return;
+      list!.insertAdjacentHTML(
+        "beforeend",
+        fresh.map(p => renderRow(p)).join("")
+      );
+    }
+
     async function loadMore(): Promise<boolean> {
       if (loading || nextOffset === null) return false;
       loading = true;
@@ -519,10 +543,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
           posts: Post[];
           nextOffset: number | null;
         };
-        list!.insertAdjacentHTML(
-          "beforeend",
-          data.posts.map(p => renderRow(p)).join("")
-        );
+        appendPosts(data.posts);
         applyReadStyles(list!);
         nextOffset = data.nextOffset;
         if (nextOffset === null) observer.disconnect();
