@@ -137,6 +137,52 @@ Astro SSR (pickchive, Workers+Assets) ──────────────
     - **단, robots.txt만으로는 부족하다 — 봇이 규칙을 지켜서 안 오든 안 지켜서 오든, 일단 온 요청은 이미 Worker 요청으로 카운트된다.** 워커 코드에서 UA 보고 403 던지는 것도 마찬가지로 요청 수를 못 줄인다. **Cloudflare WAF는 Worker보다 먼저 실행돼서 여기서 막힌 요청만 카운트에서 빠진다** — Security → Bots → "Block AI Scrapers and Crawlers"(무료 제공) + WAF Custom rule(무료 5개)이 유일한 실질 방어선이다.
     - 참고: wrangler OAuth 토큰은 `zone (read)` 권한뿐이라 **WAF 설정은 API로 못 건드린다.** 대시보드에서 직접 하거나 `Zone WAF: Edit` 권한의 API 토큰을 따로 발급해야 한다.
 
+20-1. **UA 이름 명단으로 봇을 막는 건 두더지 잡기다 — 상대가 이름을 갈아탄다 (2026-08-19 확인).** 8/18에 robots.txt와 WAF 커스텀 규칙으로 `meta-externalagent`와 `GPTBot`을 막았다. 다음 날 확인해보니 그 둘은 **정확히 0이 됐는데**, Meta가 `meta-webindexer/1.1`이라는 **명단에 없던 새 UA로 갈아타고** 똑같이 홈만 두들기고 있었다. 하루 총 105,389 요청으로 한도를 또 넘겼다.
+
+    같은 시간대(08:00~22:00 UTC) 비교 — 차단은 먹혔고, 범인만 바뀌었다:
+
+    | UA | 8/17 (차단 전) | 8/18 (차단 후) |
+    |---|---|---|
+    | `meta-externalagent` | 99,563 | **0** |
+    | `GPTBot` | 31,180 | **0** |
+    | `meta-webindexer` | 0 | **100,047** |
+    | 사람 추정(일반 브라우저) | ~1,579 | ~477 |
+
+    **새 UA는 사람처럼 위장한다.** 일반 Chrome UA 뒤에 꼬리표만 붙여서 대충 보면 안 보인다. GraphQL 결과를 앞에서 자르면 놓치니 **UA는 끝까지 볼 것**:
+    ```
+    Mozilla/5.0 (Windows NT 10.0; Win64; x64) ... Chrome/145.0.0.0 Safari/537.36
+      (compatible; meta-webindexer/1.1 (+https://developers.facebook.com/docs/sharing/webmasters/crawler))
+    ```
+
+    **트래픽의 98%가 봇인데 방문자 통계에는 안 잡힌다.** 같은 날 Cloudflare Web Analytics 비콘(`/cdn-cgi/rum`)은 28회만 찍혔다. 비콘은 브라우저가 JS를 실행해야 남는데 봇은 JS를 안 돌리기 때문이다. **"방문자는 없는데 요청은 10만"이면 봇을 의심할 것** — Workers 카운터가 세는 건 방문자가 아니라 Worker 실행 횟수다.
+
+    **어디서 거르느냐가 전부다:**
+
+    | 거르는 위치 | Worker 요청으로 카운트되나 |
+    |---|---|
+    | robots.txt (봇이 지켜서 안 옴) | 안 됨 |
+    | robots.txt (봇이 무시하고 옴) | **카운트됨** |
+    | Worker 코드에서 UA 보고 403 | **카운트됨 — 막아도 소용없다** |
+    | Cloudflare WAF (Worker보다 먼저 실행) | 안 됨 |
+
+    **그래서 3층으로 깔았다 (2026-08-19 전부 실측 검증):**
+
+    1. **WAF 커스텀 규칙** `block-ai-and-seo-crawlers` — UA 35종. 이름 나열 대신 **`meta-` 접두사**로 넣어서 Meta가 `externalagent`→`webindexer`→그 다음 뭐로 바꾸든 걸리게 했다. `facebookexternalhit`은 `meta-`를 포함하지 않으므로 **페이스북 공유 미리보기는 살아 있다.**
+    2. **Security → Bots → `Configure AI bot policies`** — Training=Block, Agent=Block, **Search=Allow**. 명단을 Cloudflare가 대신 갱신해준다. Search까지 막으면 검색 유입이 날아가니 건드리지 말 것.
+    3. **Rate limiting rule** `rate-limit-pickchive` — `/`에 IP당 10초 20회 초과 시 Block. **UA를 아예 안 보므로 이름 갈아타기가 무의미하다.** 봇은 초당 2회를 쉬지 않고 때렸고 사람은 10초에 20번 클릭할 수 없다.
+
+    **효과 실측**: 5분당 요청 **약 600 → 1** (99.8% 감소). 22:05 UTC 전파 시작, 22:10에 소멸. 차단 이벤트는 `firewallCustom`이 `meta-webindexer`를, `firewallManaged`가 관리형 규칙 몫을 잡고 있는 것으로 확인.
+
+    **검증은 반드시 "통과해야 하는 쪽"까지 할 것.** 차단만 확인하고 끝내면 검색 유입을 죽여놓고 모른다. Googlebot·네이버 Yeti·bingbot·Daum·`facebookexternalhit`·일반 브라우저 UA로 curl해서 전부 200인 걸 확인했다.
+
+    **rate limiting 테스트는 첫 라운드가 통과한다** — 배포 직후 카운터가 아직 안 잡혀서다. 60회 버스트 1회차는 전부 200, 2·3회차부터 56/60·53/60이 429로 막혔다. 한 번 해보고 "안 먹네" 하지 말 것.
+
+    **주의 — 켜면 안 되는 것 두 가지:**
+    - **Bot Fight Mode**: 자동화 트래픽 전체에 JS 챌린지를 던진다. 맥미니 launchd의 `/ingest`와 GitHub Actions의 `/crawl`이 같이 막힌다.
+    - **`Mixed purpose crawlers will be blocked on September 15` 라디오**: "검색과 학습에 같은 봇을 쓰는 업체"를 통째로 막는데, 그 목록에 Googlebot·Yeti가 들어가는지 확인할 방법이 없다. 검색 유입이 생명인 사이트라 확인 전엔 건드리지 말 것.
+
+    **AI Labyrinth**는 판단 보류 — 봇을 가짜 페이지로 유인하는 기능인데, 유인된 요청이 우리 Worker 요청으로 잡히는지 불명이라 요청 수를 되레 늘릴 위험이 있다.
+
 
 21. **고아 `astro dev` / `workerd`가 쌓여 램을 수십 GB 먹는데, `ps`로는 안 보인다 (2026-08-18 확인).** 맥미니에 `astro dev` 17개(8/11~8/16 시작)와 `workerd` 15개가 부모 없이 남아 **실제 약 23GB**를 잡고 있었다. `compressor`가 6.9GB까지 올라가 머신이 계속 스왑을 치고 있었다.
 
@@ -197,7 +243,7 @@ Astro SSR (pickchive, Workers+Assets) ──────────────
 - [x] **네이버 서치어드바이저 소유 확인** + `site.url`을 커스텀 도메인으로 정정(sitemap/canonical이 옛 workers.dev를 가리키던 문제).
 
 2026-08-18 작업:
-- [x] **AI 크롤러 폭주로 Workers 일일 한도 초과 → 사이트 다운(에러 1027) 대응** — 함정 20 참고. robots.txt 전면 재작성(AI 크롤러 25종 + SEO 봇 11종 차단, 전체 봇 대상 `Disallow: /*?`), 홈 필터 링크 전부 `rel="nofollow"`, 쿼리 붙은 홈 `noindex, follow`. **Cloudflare WAF 차단은 미적용 — 대시보드 작업 필요(권한 없음).**
+- [x] **AI 크롤러 폭주로 Workers 일일 한도 초과 → 사이트 다운(에러 1027) 대응** — 함정 20 참고. robots.txt 전면 재작성(AI 크롤러 25종 + SEO 봇 11종 차단, 전체 봇 대상 `Disallow: /*?`), 홈 필터 링크 전부 `rel="nofollow"`, 쿼리 붙은 홈 `noindex, follow`. WAF 커스텀 규칙도 이날 대시보드에서 적용됨(사용자 작업). **단 다음 날 Meta가 UA를 갈아타고 다시 한도를 넘겼다 — 함정 20-1 참고.**
 - [x] **펨코 25시간 중단 원인 규명 및 복구** — 함정 6-2 참고. 430이 IP 차단이 아니라 JS+WASM 챌린지였고, 못 푼 채 5분마다 두드리다 429 자동 차단까지 승격됐던 것. 쿠키 1회 취득 후 재사용 방식으로 재작성, 20건 수집 복구 확인.
 - [x] **SLR클럽 11시간 중단 원인 규명 및 복구** — 함정 6-3 참고. 데이터센터 IP 차단(Workers 404/521, 한국 IP는 UA 없이도 200)으로 확인. 맥미니 launchd 경로로 이전하고 크론·GH Actions에서 제거, 30건 수집 복구.
 - [x] **고아 개발 프로세스 23GB 정리** — 함정 21 참고. `astro dev` 17개 + `workerd` 15개 정리(compressor 6.9GB→0.7GB). 정리 스크립트는 반쪽짜리라 폐기하고 재부팅을 표준 대응으로 정함.
@@ -214,6 +260,7 @@ Astro SSR (pickchive, Workers+Assets) ──────────────
 - [ ] **구글 애드센스 신청** — 개인정보처리방침은 완료. 애널리틱스 연동해서 실제 트래픽 확인 후 신청 검토 (사이트가 본문 없이 제목+링크만 있는 어그리게이터 구조라 콘텐츠 정책에 걸릴 수 있음도 염두에 둘 것).
 - [ ] **인라인 댓글(펼쳐보기)** — 지금은 "댓글 보기" 누르면 `/p/[id]`로 이동. 목록에서 아코디언으로 바로 보고 쓰는 UX 아이디어 논의만 함(2026-08-15), 미착수. SSR용(PostRow.astro)/클라이언트 렌더링용(index.astro 무한스크롤·검색) 두 군데 다 손대야 함.
 - [ ] **git identity 설정** — `git config user.name/email` 필요시 설정.
-- [ ] **Cloudflare WAF AI 봇 차단 미적용** — 함정 20. robots.txt/nofollow는 코드로 넣었지만 규칙을 무시하는 봇은 그대로 들어오고, 지키는 봇도 반영까지 시간이 걸린다. Security → Bots → "Block AI Scrapers and Crawlers" 토글 + WAF Custom rule이 필요한데 wrangler 토큰 권한 밖이라 대시보드에서 직접 해야 한다. **이거 켜기 전까지 한도 재초과 위험은 그대로다.**
+- [x] ~~**Cloudflare WAF AI 봇 차단 미적용**~~ — **2026-08-19 해결.** WAF 커스텀 규칙(`meta-` 접두사 포함 UA 35종) + 관리형 AI bot policies(Training/Agent=Block, Search=Allow) + rate limiting(`/`, IP당 10초 20회) 3층으로 적용. 5분당 요청 600→1로 실측 확인. 함정 20-1 참고.
+- [ ] **9/15 전 `Mixed purpose crawlers` 정책 재검토** — 함정 20-1. Cloudflare의 legacy `Block AI bots`가 2026-09-15에 없어지고 새 AI bot policies로 대체된다. 그때 "검색과 학습에 같은 봇을 쓰는 업체를 막을 것인가" 라디오를 정해야 하는데, **그 목록에 Googlebot·네이버 Yeti가 포함되는지 확인이 안 돼 보류 중이다.** 9월 전에 Cloudflare 문서로 대상 크롤러 목록을 확인하고 결정할 것. 지금은 기본값(허용) 상태.
 - [x] ~~**펨코 맥미니 홈 IP까지 차단됨**~~ — **2026-08-18 해결.** 홈 IP 차단이 아니라 JS+WASM 챌린지를 못 푼 것이었고, 못 푸는 채로 계속 두드려서 429 자동 차단까지 올라갔던 것. 함정 6-2 참고.
 - [x] ~~**SLR클럽 원본 521**~~ — **2026-08-18 해결.** 원본 장애가 아니라 데이터센터 IP 차단이었다. 맥미니 경로로 이전. 함정 6-3 참고.

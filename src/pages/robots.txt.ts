@@ -24,6 +24,7 @@ const AI_CRAWLERS = [
   "anthropic-ai",
   "meta-externalagent",
   "meta-externalfetcher",
+  "meta-webindexer",
   "FacebookBot",
   "Google-Extended",
   "Applebot-Extended",
