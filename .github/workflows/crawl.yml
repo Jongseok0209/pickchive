@@ -38,9 +38,9 @@ jobs:
       - name: Crawl mlbpark
         continue-on-error: true
         run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=mlbpark&src=gha"
-      - name: Crawl slrclub
-        continue-on-error: true
-        run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=slrclub&src=gha"
+      # SLR클럽은 데이터센터 IP를 차단해서(Workers/GH Actions 모두 404/521) 이
+      # 경로로는 성공할 수 없다. 맥미니(한국 홈 IP) launchd에서만 수집한다 —
+      # 상세는 AGENTS.md 함정 6-3 참고.
       - name: Crawl damoang
         continue-on-error: true
         run: curl -sf "https://pickchive-crawler.won0209.workers.dev/crawl?site=damoang&src=gha"

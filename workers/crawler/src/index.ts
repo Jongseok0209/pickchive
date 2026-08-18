@@ -101,7 +101,9 @@ const HTTP_CRAWL_SITES = [
   "humoruniv",
   "etoland",
   "mlbpark",
-  "slrclub",
+  // slrclub은 2026-08-18에 맥미니(한국 홈 IP) 경로로 옮겼다 — Workers IP에서는
+  // 404/521만 돌아온다(순수 IP 차단, 한국에서는 UA 없이도 200). 성공할 수 없는
+  // 수집 경로를 남겨두면 실패 기록만 쌓여 진짜 문제를 가린다(함정 6-1).
   "damoang",
 ];
 
@@ -124,6 +126,7 @@ const CRAWL_FETCHERS: Record<
   humoruniv: (db, src) => crawlSite(db, "humoruniv", fetchHumoruniv, undefined, src),
   etoland: (db, src) => crawlSite(db, "etoland", fetchEtoland, undefined, src),
   mlbpark: (db, src) => crawlSite(db, "mlbpark", fetchMlbpark, undefined, src),
+  // 크론 로테이션에서는 빠졌지만 /crawl?site=slrclub 수동 진단용으로 남겨둔다.
   slrclub: (db, src) => crawlSite(db, "slrclub", fetchSlrclub, undefined, src),
   fmkorea: (db, src) => crawlSite(db, "fmkorea", fetchFmkorea, undefined, src),
   damoang: (db, src) => crawlSite(db, "damoang", fetchDamoang, undefined, src),
