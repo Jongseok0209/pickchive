@@ -28,6 +28,15 @@ import { homedir } from "node:os";
 const LIST_URL = "https://www.fmkorea.com/best?listStyle=list";
 const INGEST_URL = "https://pickchive-crawler.won0209.workers.dev/ingest";
 const COOKIE_FILE = `${homedir()}/Library/Application Support/pickchive/fmkorea-cookies.txt`;
+const STATE_FILE = `${homedir()}/Library/Application Support/pickchive/fmkorea-block-state.json`;
+// 차단/챌린지 페이지 판정. 2026-08-20까지 이 정규식이 `/보안 시스템/`(띄어쓰기 있음)
+// 이었는데 실제 제목은 "에펨코리아 보안시스템"(띄어쓰기 없음)이라 **한 번도 매치되지
+// 않았다.** 그래서 차단 페이지를 보고 있으면서 solved=true로 판정했고, 쿠키를 0개
+// 들고 재요청한 뒤 "re-blocked after solve"라는 엉뚱한 이유를 남겼다. 실제로는 solve
+// 자체가 안 된 것이었다. 공백 유무를 모두 받도록 \s* 로 둔다.
+const BLOCK_PAGE_RE = /보안\s*시스템/;
+// 하드블록(429)을 만났을 때 쉬는 시간. 연속 횟수에 따라 늘린다.
+const BACKOFF_MS = [30, 60, 120, 240, 360].map(m => m * 60_000);
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36";
 // 챌린지 통과에 실제로 필요한 쿠키만 보관한다. 광고/분석 쿠키(_ga, __gads 등)까지
@@ -79,12 +88,27 @@ function saveCookies(header) {
   writeFileSync(COOKIE_FILE, header);
 }
 
+// 하드블록 백오프 상태. 429를 맞으면 "언제까지 쉴지"를 디스크에 남긴다 —
+// launchd가 5분마다 새 프로세스를 띄우므로 메모리로는 이어지지 않는다.
+function loadState() {
+  try {
+    return JSON.parse(readFileSync(STATE_FILE, "utf8"));
+  } catch {
+    return { consecutive: 0, blockedUntil: 0 };
+  }
+}
+
+function saveState(state) {
+  mkdirSync(dirname(STATE_FILE), { recursive: true });
+  writeFileSync(STATE_FILE, JSON.stringify(state));
+}
+
 // 챌린지 페이지인지 판별. 430(챌린지)과 429(자동 차단)를 구분해서 남겨야
 // "풀면 되는 상태"인지 "이미 찍혀서 굳은 상태"인지 로그만 보고 알 수 있다.
 function challengeKind(status, html) {
   if (status === 430) return "challenge";
   if (status === 429) return "hard-block";
-  if (/에펨코리아 보안 시스템/.test(html)) return "challenge";
+  if (BLOCK_PAGE_RE.test(html)) return "challenge";
   return null;
 }
 
@@ -125,11 +149,11 @@ async function solveChallenge() {
     });
     // WASM이 쿠키를 심고 스스로 리다이렉트할 시간을 준다.
     await page.waitForTimeout(6000);
-    if (/보안 시스템/.test(await page.title())) {
+    if (BLOCK_PAGE_RE.test(await page.title())) {
       await page.reload({ waitUntil: "domcontentloaded", timeout: 45000 });
       await page.waitForTimeout(4000);
     }
-    const solved = !/보안 시스템/.test(await page.title());
+    const solved = !BLOCK_PAGE_RE.test(await page.title());
     const header = (await ctx.cookies())
       .filter(c => KEEP_COOKIES.includes(c.name))
       .map(c => `${c.name}=${c.value}`)
@@ -187,6 +211,19 @@ async function crawlFmkorea() {
   let { status, html } = await fetchList(loadCookies());
   let kind = challengeKind(status, html);
 
+  // 하드블록(429)은 "풀면 되는 상태"가 아니라 이미 찍혀서 굳은 상태다. 여기서
+  // 브라우저를 띄워봐야 챌린지가 안 풀리고, 요청만 더 쌓여서 차단이 유지된다.
+  // 2026-08-19 16시간 중단이 정확히 이 경로였다 — 5분마다 크로미움을 띄워
+  // 두 번씩 두드리길 190여 회. 그냥 물러난다.
+  if (kind === "hard-block") {
+    return {
+      slug: "fmkorea",
+      posts: [],
+      hardBlocked: true,
+      error: `hard-block (status=${status}) — 요청 중단하고 백오프`,
+    };
+  }
+
   // 저장된 쿠키가 만료됐거나 아예 없으면 여기서 걸린다 — 그때만 브라우저를 띄운다.
   if (kind) {
     const { solved, header } = await solveChallenge();
@@ -195,6 +232,9 @@ async function crawlFmkorea() {
       return {
         slug: "fmkorea",
         posts: [],
+        // 못 푸는 채로 계속 두드리면 430이 429로 승격된다(2026-08-18에 겪음).
+        // 그래서 "못 풀었음"도 백오프 대상이다.
+        hardBlocked: true,
         error: `challenge unsolved (${kind}, status=${status}) — 브라우저로도 통과 실패`,
       };
     }
@@ -204,6 +244,7 @@ async function crawlFmkorea() {
       return {
         slug: "fmkorea",
         posts: [],
+        hardBlocked: kind === "hard-block",
         error: `challenge re-blocked after solve (${kind}, status=${status})`,
       };
     }
@@ -224,29 +265,62 @@ async function crawlFmkorea() {
   return { slug: "fmkorea", posts, solvedThisRun };
 }
 
+// 수집 결과를 크롤러 워커에 보낸다. source를 실어 보내야 /status 타임라인에서 이
+// 맥미니 수집분을 크론·GitHub Actions 결과와 구분할 수 있다(예전엔 뒤섞여서 펨코가
+// "됐다 안 됐다" 하는 것처럼 보였다).
+async function report(payload, ts, note = "") {
+  const res = await fetch(INGEST_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...payload, source: "macmini" }),
+  });
+  const text = await res.text();
+  console.log(
+    `[fmkorea-home] ${ts} posts=${payload.posts.length}${note} ingest="${text}"`
+  );
+}
+
 async function run() {
+  const ts = new Date().toISOString();
+  const state = loadState();
+
+  // 백오프 중이면 펨코를 아예 건드리지 않는다 — fetch도 브라우저도 없다.
+  // 차단을 푸는 유일한 방법은 조용히 있는 것인데, 이유는 남겨야 /status에서
+  // "왜 안 들어오는지"가 보인다(수집 실패엔 반드시 이유를 남긴다는 원칙).
+  if (state.blockedUntil && Date.now() < state.blockedUntil) {
+    const mins = Math.ceil((state.blockedUntil - Date.now()) / 60_000);
+    await report(
+      {
+        slug: "fmkorea",
+        posts: [],
+        error: `hard-block 백오프 중 — ${mins}분 후 재시도 (연속 ${state.consecutive}회 차단)`,
+      },
+      ts
+    );
+    return;
+  }
+
   // launchd 주기(300초)가 펨코 차단의 retry-after(300초)와 정확히 같아서, 매 요청이
   // 차단 해제 시점을 칼같이 노리는 패턴으로 보였다. 무작위 지연으로 주기를 흐트러뜨린다.
   if (!process.env.PICKCHIVE_NO_JITTER) {
     await new Promise(r => setTimeout(r, Math.floor(Math.random() * 90_000)));
   }
 
-  const ts = new Date().toISOString();
   try {
     const data = await crawlFmkorea();
-    const { solvedThisRun, ...payload } = data;
-    const res = await fetch(INGEST_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      // source를 실어 보내야 /status 타임라인에서 이 맥미니 수집분을 크론·GitHub
-      // Actions 결과와 구분할 수 있다(예전엔 뒤섞여서 펨코가 "됐다 안 됐다"
-      // 하는 것처럼 보였다).
-      body: JSON.stringify({ ...payload, source: "macmini" }),
-    });
-    const text = await res.text();
-    console.log(
-      `[fmkorea-home] ${ts} posts=${data.posts.length}${solvedThisRun ? " (챌린지 재통과)" : ""} ingest="${text}"`
-    );
+    const { solvedThisRun, hardBlocked, ...payload } = data;
+
+    if (payload.posts.length > 0) {
+      // 성공하면 백오프 기록을 지운다.
+      saveState({ consecutive: 0, blockedUntil: 0 });
+    } else if (hardBlocked) {
+      const n = state.consecutive + 1;
+      const wait = BACKOFF_MS[Math.min(n - 1, BACKOFF_MS.length - 1)];
+      saveState({ consecutive: n, blockedUntil: Date.now() + wait });
+      payload.error += ` → ${wait / 60_000}분 쉼 (연속 ${n}회)`;
+    }
+
+    await report(payload, ts, solvedThisRun ? " (챌린지 재통과)" : "");
   } catch (err) {
     console.error(`[fmkorea-home] ${ts} error:`, err?.message ?? err);
   }
